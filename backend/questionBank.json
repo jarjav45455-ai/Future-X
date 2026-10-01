@@ -1,0 +1,277 @@
+{
+  "questions": [
+    {
+      "id": "q-tech-01",
+      "domain": "Software Engineering",
+      "difficulty": "EASY",
+      "skill": "State Management & React Architecture",
+      "question": "In a reactive client application, what is the primary consequence of mutating state directly instead of using dispatch or setter hooks?",
+      "snippet": "state.user.isVerified = true; // Direct mutation",
+      "options": [
+        "Component reconciliation fails to trigger re-renders, causing stale UI bugs",
+        "The JavaScript runtime crashes with an out-of-memory error",
+        "The backend API connection is immediately aborted",
+        "The browser layout engine forces synchronous reflow on every thread"
+      ],
+      "correctIndex": 0,
+      "explanation": "React checks shallow references. Mutating state in-place keeps the memory reference identical, bypassing reconciliation."
+    },
+    {
+      "id": "q-tech-02",
+      "domain": "Software Engineering",
+      "difficulty": "EASY",
+      "skill": "Relational Data Modeling & PostgreSQL",
+      "question": "Which SQL constraint ensures that rows in a child table cannot reference a non-existent record in the parent table?",
+      "options": [
+        "FOREIGN KEY constraint with referential integrity",
+        "UNIQUE INDEX constraint",
+        "CHECK constraint on scalar values",
+        "AUTO_INCREMENT sequence lock"
+      ],
+      "correctIndex": 0,
+      "explanation": "Foreign keys enforce referential integrity between matching parent-child relational entities."
+    },
+    {
+      "id": "q-tech-03",
+      "domain": "Software Engineering",
+      "difficulty": "EASY",
+      "skill": "Authentication & OAuth2 / Session Security",
+      "question": "Where should short-lived JSON Web Tokens (JWT) for authentication be stored on mobile native clients to prevent unauthorized extraction?",
+      "options": [
+        "Hardware-backed secure storage (iOS Keychain / Android KeyStore)",
+        "Unencrypted AsyncStorage or LocalStorage files",
+        "In a public static environment variable file",
+        "In the plain app bundle manifest"
+      ],
+      "correctIndex": 0,
+      "explanation": "Hardware keychains provide cryptographic isolation preventing sandboxed file access."
+    },
+    {
+      "id": "q-tech-04",
+      "domain": "Software Engineering",
+      "difficulty": "EASY",
+      "skill": "Git & CI/CD Deployment",
+      "question": "What is the primary benefit of running automated linting and unit test suites on every pull request prior to merging?",
+      "options": [
+        "Early detection of regression defects before code hits staging/production branches",
+        "Eliminating the requirement for backend database indexes",
+        "Reducing the physical size of the server operating system image",
+        "Accelerating network round-trip latency to edge CDNs"
+      ],
+      "correctIndex": 0,
+      "explanation": "Shift-left verification ensures regression bugs never pollute trunk branches."
+    },
+    {
+      "id": "q-tech-05",
+      "domain": "General Domain",
+      "difficulty": "EASY",
+      "skill": "Operational Execution",
+      "question": "In an engineering production environment, what is the primary purpose of defining Service Level Objectives (SLOs)?",
+      "options": [
+        "Setting target reliability and performance metrics aligned with user satisfaction",
+        "Maximizing developer shift hours during non-incident cycles",
+        "Completely eliminating all cloud infrastructure spend",
+        "Replacing the need for structured logging and trace events"
+      ],
+      "correctIndex": 0,
+      "explanation": "SLOs specify target boundaries (e.g. 99.9% uptime) that govern development velocity vs reliability."
+    },
+    {
+      "id": "q-tech-06",
+      "domain": "Software Engineering",
+      "difficulty": "MEDIUM",
+      "skill": "RESTful & GraphQL API Contracts",
+      "question": "When designing an idempotent payment creation endpoint, how do you prevent double-billing if a network timeout occurs mid-request?",
+      "snippet": "POST /api/v1/charges\nHeaders: Idempotency-Key: 7b89f2a4",
+      "options": [
+        "Require a unique Idempotency-Key header and cache transaction state in a fast distributed store",
+        "Automatically issue a refund on every 504 Gateway Timeout error",
+        "Retry the exact same unflagged request five times in a tight loop",
+        "Disable transaction isolation levels in the relational database"
+      ],
+      "correctIndex": 0,
+      "explanation": "Idempotency keys ensure server-side deduplication regardless of network client retries."
+    },
+    {
+      "id": "q-tech-07",
+      "domain": "Software Engineering",
+      "difficulty": "MEDIUM",
+      "skill": "Memory Management & Concurrency Models",
+      "question": "In an asynchronous Node.js microservice handling 10,000 req/sec, what happens if a synchronous CPU-heavy loop is executed in an API route?",
+      "options": [
+        "The single event loop thread is blocked, freezing all concurrent requests across the instance",
+        "Node.js spawns 1,000 separate operating system processes automatically",
+        "Traffic is instantly rerouted to GPU workers without latency degradation",
+        "Only the calling client experiences delays while others remain sub-10ms"
+      ],
+      "correctIndex": 0,
+      "explanation": "Node.js runs on a single event loop thread. Synchronous CPU tasks freeze handling of concurrent I/O."
+    },
+    {
+      "id": "q-tech-08",
+      "domain": "Software Engineering",
+      "difficulty": "MEDIUM",
+      "skill": "PostgreSQL Indexing & Execution Plans",
+      "question": "What is the primary architectural tradeoff when adding multiple composite indexes to a high-write relational database table?",
+      "options": [
+        "Faster SELECT query execution times at the expense of slower INSERT/UPDATE throughput and increased disk footprint",
+        "Decreased disk usage but higher latency on indexed read queries",
+        "Automatic conversion of all B-tree indexes into volatile RAM hashes",
+        "Total prevention of database deadlocks during batch operations"
+      ],
+      "correctIndex": 0,
+      "explanation": "Every write requires updating index trees on disk, degrading write throughput while speeding up reads."
+    },
+    {
+      "id": "q-tech-09",
+      "domain": "Software Engineering",
+      "difficulty": "MEDIUM",
+      "skill": "Event-Driven Messaging (Kafka / RabbitMQ)",
+      "question": "When an external microservice experiences intermittent 503 service unavailable errors, which design pattern prevents catastrophic thundering herds?",
+      "options": [
+        "Exponential backoff retry with randomized jitter and circuit breaking",
+        "Immediate aggressive infinite polling without sleep intervals",
+        "Dropping all incoming consumer events permanently without an audit log",
+        "Crashing the container worker pod immediately"
+      ],
+      "correctIndex": 0,
+      "explanation": "Exponential backoff spread with jitter de-synchronizes retry spikes, preventing self-inflicted DDoS."
+    },
+    {
+      "id": "q-tech-10",
+      "domain": "Software Engineering",
+      "difficulty": "MEDIUM",
+      "skill": "TypeScript Deep Type Inference",
+      "question": "What is the advantage of using discriminated unions with a literal discriminator key over generic 'any' typing?",
+      "snippet": "type Action = { type: 'SUCCESS'; payload: Data } | { type: 'ERROR'; error: string };",
+      "options": [
+        "Enables exhaustive compile-time narrowing and prevents accessing missing properties",
+        "Speeds up browser JavaScript runtime compilation speed by 40%",
+        "Eliminates the requirement for unit tests in downstream codebases",
+        "Allows arbitrary dynamic key assignment without compiler complaints"
+      ],
+      "correctIndex": 0,
+      "explanation": "Discriminated unions force type safety across branch checks at compile time."
+    },
+    {
+      "id": "q-tech-11",
+      "domain": "Software Engineering",
+      "difficulty": "MEDIUM",
+      "skill": "System Telemetry & Observability",
+      "question": "In distributed microservices, what mechanism allows tracing a single customer transaction across 6 distinct downstream service hops?",
+      "options": [
+        "Propagating a unique Correlation / Trace ID via HTTP headers across all service boundaries",
+        "Logging the physical MAC address of the host database server",
+        "Recording the client timestamp without timezone normalization",
+        "Using synchronous database transactions across multiple clouds"
+      ],
+      "correctIndex": 0,
+      "explanation": "Correlation IDs (W3C Trace Context) connect disparate log events into a unified distributed trace."
+    },
+    {
+      "id": "q-tech-12",
+      "domain": "Software Engineering",
+      "difficulty": "HARD",
+      "skill": "Distributed Systems & Caching",
+      "question": "Under high read concurrency, what failure mode occurs when a heavily queried cache key expires simultaneously, and how is it mitigated?",
+      "options": [
+        "Cache Stampede (Thundering Herd); mitigated via mutual exclusion distributed locks or probabilistic early expiration (XFetch)",
+        "Memory Fragmentation; mitigated by disabling cache eviction policies",
+        "Split-Brain Condition; mitigated by disabling database replication",
+        "Cascading Deadlock; mitigated by switching cache protocols from TCP to UDP"
+      ],
+      "correctIndex": 0,
+      "explanation": "Cache Stampedes overwhelm databases when hundreds of queries miss simultaneously upon TTL expiration."
+    },
+    {
+      "id": "q-tech-13",
+      "domain": "Software Engineering",
+      "difficulty": "HARD",
+      "skill": "Relational Data Modeling & PostgreSQL",
+      "question": "Which transaction isolation level prevents phantom reads and serialization anomalies at the cost of potential serialization failure aborts?",
+      "options": [
+        "SERIALIZABLE",
+        "READ COMMITTED",
+        "READ UNCOMMITTED",
+        "REPEATABLE READ without predicate locks"
+      ],
+      "correctIndex": 0,
+      "explanation": "Serializable isolation guarantees that concurrent transaction outcomes are identical to serial execution."
+    },
+    {
+      "id": "q-tech-14",
+      "domain": "Software Engineering",
+      "difficulty": "HARD",
+      "skill": "System Architecture & Fault Tolerance",
+      "question": "In event-driven architectures, how is dual-write inconsistency avoided when simultaneously saving a local database entity and publishing a message to a broker?",
+      "options": [
+        "Transactional Outbox Pattern with an asynchronous CDC / log tailing publisher",
+        "Running the database write and broker publish in an uncoordinated Promise.all()",
+        "Publishing to the message broker first and rolling back on database failure",
+        "Using HTTP webhooks instead of a persistent broker"
+      ],
+      "correctIndex": 0,
+      "explanation": "The Outbox pattern writes domain changes and outgoing events in the same atomic database transaction."
+    },
+    {
+      "id": "q-tech-15",
+      "domain": "Software Engineering",
+      "difficulty": "HARD",
+      "skill": "Distributed Data Stores & Relational Profiling",
+      "question": "According to the CAP Theorem, when an unavoidable network partition occurs in a distributed data cluster, what fundamental tradeoff must be made?",
+      "options": [
+        "Choose between Consistency (returning latest data or erroring) and Availability (returning stale data without error)",
+        "Choose between Partition Tolerance and Total Disk Encryption",
+        "Sacrifice both Latency and Security to maintain full CPU concurrency",
+        "Guarantee 100% throughput across all regions simultaneously without replication lag"
+      ],
+      "correctIndex": 0,
+      "explanation": "During partitions (P), distributed systems can prioritize immediate consistency (CP) or constant response availability (AP)."
+    },
+    {
+      "id": "q-gen-16",
+      "domain": "General Domain",
+      "difficulty": "EASY",
+      "skill": "Core Knowledge",
+      "question": "What is the primary indicator that an engineering deliverable is ready for production deployment?",
+      "options": [
+        "Passing all automated integration tests, meeting performance baselines, and passing security audits",
+        "The project builds successfully on one developer's local workstation",
+        "Code comments have been removed to reduce bundle file sizes",
+        "Database migrations are performed manually directly on the production instance"
+      ],
+      "correctIndex": 0,
+      "explanation": "Production readiness requires verified automated regression passes and security compliance."
+    },
+    {
+      "id": "q-gen-17",
+      "domain": "General Domain",
+      "difficulty": "MEDIUM",
+      "skill": "Technical",
+      "question": "When refactoring a legacy operational pipeline, what is the best practice to avoid breaking critical downstream dependents?",
+      "options": [
+        "Maintain backward-compatible API contracts and deploy behind feature flags with canary rollout",
+        "Rename public schema fields immediately to reflect newer terminology",
+        "Shut down the older service version completely during business hours",
+        "Disable integration telemetry until the refactor is 100% finalized"
+      ],
+      "correctIndex": 0,
+      "explanation": "Contract versioning and feature flags ensure non-breaking transitions for downstream consumers."
+    },
+    {
+      "id": "q-gen-18",
+      "domain": "General Domain",
+      "difficulty": "HARD",
+      "skill": "Execution",
+      "question": "How do technical organizations prevent silent data corruption in mission-critical distributed storage pipelines?",
+      "options": [
+        "End-to-end cryptographic checksum verification (SHA-256) and periodic reconciliation audits",
+        "Relying solely on local operating system file permissions",
+        "Assuming transport layer TCP checksums catch 100% of bit-rot defects",
+        "Increasing server memory without adding data validation layers"
+      ],
+      "correctIndex": 0,
+      "explanation": "Cryptographic checksums detect storage media bit-rot, transmission corruption, and software bugs."
+    }
+  ]
+}

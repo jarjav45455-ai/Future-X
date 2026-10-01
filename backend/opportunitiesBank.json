@@ -1,0 +1,166 @@
+{
+  "portals": [
+    {
+      "id": "opp-devpost",
+      "name": "Devpost Global Hackathons",
+      "type": "HACKATHON",
+      "domains": ["tech", "ai", "web3", "engineering"],
+      "authority": "Global Tier-1",
+      "baseQueryUrl": "https://devpost.com/hackathons?search=",
+      "description": "Global hackathon platform hosting official challenges from Google, AWS, Microsoft, and OpenAI."
+    },
+    {
+      "id": "opp-unstop-hack",
+      "name": "Unstop National Innovation Sprints",
+      "type": "HACKATHON",
+      "domains": ["tech", "business", "design", "engineering", "finance"],
+      "authority": "India / Global Tier-1",
+      "baseQueryUrl": "https://unstop.com/hackathons?search=",
+      "description": "Premier platform for college hackathons, case competitions, and engineering challenges across India."
+    },
+    {
+      "id": "opp-sih",
+      "name": "Smart India Hackathon (SIH)",
+      "type": "HACKATHON",
+      "domains": ["tech", "engineering", "agriculture", "healthcare", "hardware"],
+      "authority": "Ministry of Education & AICTE",
+      "baseQueryUrl": "https://www.sih.gov.in",
+      "description": "World's biggest open innovation hackathon solving national problems across government ministries."
+    },
+    {
+      "id": "opp-mlh",
+      "name": "Major League Hacking (MLH) Sprints",
+      "type": "HACKATHON",
+      "domains": ["tech", "open-source", "web"],
+      "authority": "Global Official League",
+      "baseQueryUrl": "https://mlh.io/seasons/2026/events",
+      "description": "Official student hackathon league hosting continuous weekly 48-hour global invention marathons."
+    },
+    {
+      "id": "opp-ethglobal",
+      "name": "ETHGlobal Web3 & Distributed Grants",
+      "type": "HACKATHON",
+      "domains": ["tech", "web3", "systems"],
+      "authority": "Ethereum Ecosystem",
+      "baseQueryUrl": "https://ethglobal.com/events",
+      "description": "Leading global decentralized architecture and protocol development sprint with large bounty pools."
+    },
+    {
+      "id": "opp-kaggle",
+      "name": "Kaggle Competitive Data Science & AI Sprints",
+      "type": "HACKATHON",
+      "domains": ["tech", "data-science", "ai", "finance", "healthcare"],
+      "authority": "Google DeepMind Ecosystem",
+      "baseQueryUrl": "https://www.kaggle.com/competitions?search=",
+      "description": "Machine learning, mathematical modeling, and AI benchmark competitions with industry prizes."
+    },
+    {
+      "id": "opp-wellfound",
+      "name": "Wellfound (AngelList) High-Growth Tech Roles",
+      "type": "INTERNSHIP",
+      "domains": ["tech", "design", "product", "finance", "marketing"],
+      "authority": "Venture Ecosystem Standard",
+      "baseQueryUrl": "https://wellfound.com/jobs?query=",
+      "description": "Direct entry pipeline into Seed, Series-A, and unicorn tech startups worldwide."
+    },
+    {
+      "id": "opp-gsoc",
+      "name": "Google Summer of Code (GSoC)",
+      "type": "FELLOWSHIP",
+      "domains": ["tech", "open-source", "systems"],
+      "authority": "Google Open Source",
+      "baseQueryUrl": "https://summerofcode.withgoogle.com/programs/2026/organizations",
+      "description": "Prestigious international fellowship stipended program contributing directly to production open source repositories."
+    },
+    {
+      "id": "opp-ycombinator",
+      "name": "Y Combinator Work-At-A-Startup",
+      "type": "JOB",
+      "domains": ["tech", "ai", "product", "operations", "engineering"],
+      "authority": "Y Combinator",
+      "baseQueryUrl": "https://www.workatastartup.com/jobs?query=",
+      "description": "Direct application portal for top 1% YC-backed portfolio companies worldwide."
+    },
+    {
+      "id": "opp-internshala",
+      "name": "Internshala Verified Cohorts",
+      "type": "INTERNSHIP",
+      "domains": ["general", "tech", "finance", "marketing", "legal", "design"],
+      "authority": "Pan-India Verified",
+      "baseQueryUrl": "https://internshala.com/internships/keywords-",
+      "description": "Verified student internship listings across companies with protected monthly stipends."
+    },
+    {
+      "id": "opp-linkedin-jobs",
+      "name": "LinkedIn Early Career Radar",
+      "type": "JOB",
+      "domains": ["all"],
+      "authority": "Global Enterprise Standard",
+      "baseQueryUrl": "https://www.linkedin.com/jobs/search/?keywords=",
+      "description": "Enterprise-grade real-time market telemetry and verified direct-recruiter job posts."
+    },
+    {
+      "id": "opp-bmj-careers",
+      "name": "BMJ Global Clinical & Hospital Careers",
+      "type": "JOB",
+      "domains": ["healthcare", "medicine", "nursing", "surgery"],
+      "authority": "British Medical Journal / Global NHS",
+      "baseQueryUrl": "https://www.bmj.com/jobs/search?keywords=",
+      "description": "Verified international medical residencies, clinical fellowships, and specialist surgeon postings."
+    },
+    {
+      "id": "opp-medscape",
+      "name": "Medscape Physician & Research Radar",
+      "type": "FELLOWSHIP",
+      "domains": ["healthcare", "medicine"],
+      "authority": "Global Clinical Network",
+      "baseQueryUrl": "https://www.medscape.com/jobs",
+      "description": "Clinical trials, medical residency tracks, and accredited healthcare fellowships."
+    },
+    {
+      "id": "opp-barandbench",
+      "name": "Bar & Bench Legal Clerkships & Associate Openings",
+      "type": "INTERNSHIP",
+      "domains": ["legal", "law", "corporate-law"],
+      "authority": "Indian Legal Standard",
+      "baseQueryUrl": "https://www.barandbench.com/apprentice-lawyer",
+      "description": "High Court clerkships, top-tier law firm associateships (Shardul, Trilegal, AZB), and in-house legal councils."
+    },
+    {
+      "id": "opp-efinancial",
+      "name": "eFinancialCareers Banking & Quantitative Finance",
+      "type": "JOB",
+      "domains": ["finance", "banking", "trading", "fintech"],
+      "authority": "Wall Street & Global FinTech",
+      "baseQueryUrl": "https://www.efinancialcareers.com/jobs?q=",
+      "description": "Direct institutional gateway to investment banks, hedge funds, risk management, and quantitative finance."
+    },
+    {
+      "id": "opp-dribbble",
+      "name": "Dribbble UI/UX & Product Design Radar",
+      "type": "JOB",
+      "domains": ["design", "ui-ux", "product"],
+      "authority": "Global Design Standard",
+      "baseQueryUrl": "https://dribbble.com/jobs?keyword=",
+      "description": "High-craft design sprints, freelance contracts, and full-time product design opportunities."
+    },
+    {
+      "id": "opp-flightglobal",
+      "name": "FlightGlobal Aviation & Flight Deck Roles",
+      "type": "JOB",
+      "domains": ["aviation", "pilot", "aerospace"],
+      "authority": "Global ICAO Standard",
+      "baseQueryUrl": "https://www.flightglobal.com/jobs/search?keywords=",
+      "description": "First officer cadet openings, flight operations management, and aerospace engineering positions."
+    },
+    {
+      "id": "opp-nasa-intern",
+      "name": "NASA & ISRO Student Research Sprints",
+      "type": "FELLOWSHIP",
+      "domains": ["aerospace", "physics", "engineering", "tech"],
+      "authority": "Global Space Agencies",
+      "baseQueryUrl": "https://intern.nasa.gov/",
+      "description": "Space science, mission telemetry, and propulsion engineering student research internships."
+    }
+  ]
+}

@@ -1,0 +1,290 @@
+{
+  "frontend": {
+    "phase1": [
+      {
+        "id": "fe-p1-1",
+        "difficulty": "EASY",
+        "skill": "Component Lifecycle",
+        "question": "What will cause an infinite re-render loop in the following React component?",
+        "snippet": "function UserList() {\n  const [users, setUsers] = useState([]);\n  fetch('/api/users')\n    .then(res => res.json())\n    .then(data => setUsers(data));\n  return <div>{users.length}</div>;\n}",
+        "options": [
+          "Calling setUsers directly inside the component body without useEffect",
+          "Using fetch instead of an Axios instance",
+          "Missing key prop on the root div element",
+          "Initializing useState with an empty array"
+        ],
+        "correctIndex": 0
+      },
+      {
+        "id": "fe-p1-2",
+        "difficulty": "MEDIUM",
+        "skill": "React State Mutability",
+        "question": "Identify why the UI fails to update when pushing an item to state:",
+        "snippet": "const addItem = (item) => {\n  items.push(item);\n  setItems(items);\n};",
+        "options": [
+          "Array reference didn't change so React skipped re-render; should be setItems([...items, item])",
+          "push() is an asynchronous operation in ES6",
+          "setItems requires a Promise callback",
+          "State cannot hold arrays in functional components"
+        ],
+        "correctIndex": 0
+      },
+      {
+        "id": "fe-p1-3",
+        "difficulty": "EASY",
+        "skill": "CSS Layout Engine",
+        "question": "Which CSS rule prevents a flex child from shrinking past its content size?",
+        "snippet": ".child {\n  flex-shrink: 0;\n}",
+        "options": [
+          "flex-shrink: 0",
+          "flex-basis: auto",
+          "align-self: stretch",
+          "box-sizing: content-box"
+        ],
+        "correctIndex": 0
+      },
+      {
+        "id": "fe-p1-4",
+        "difficulty": "MEDIUM",
+        "skill": "Event Loop & Async",
+        "question": "What is the logged order of execution for this JavaScript snippet?",
+        "snippet": "console.log('1');\nsetTimeout(() => console.log('2'), 0);\nPromise.resolve().then(() => console.log('3'));\nconsole.log('4');",
+        "options": [
+          "1, 4, 3, 2",
+          "1, 2, 3, 4",
+          "1, 3, 4, 2",
+          "1, 4, 2, 3"
+        ],
+        "correctIndex": 0
+      }
+    ],
+    "phase2": [
+      {
+        "id": "fe-p2-1",
+        "difficulty": "HARD",
+        "skill": "Performance & Memoization",
+        "question": "Why does React.memo fail to prevent child re-renders in this snippet?",
+        "snippet": "function Parent() {\n  const [count, setCount] = useState(0);\n  const handleClick = () => console.log('click');\n  return <MemoizedChild onClick={handleClick} />;\n}",
+        "options": [
+          "handleClick creates a new reference on every render; wrap it in useCallback",
+          "React.memo does not work on components with props",
+          "Parent state count is directly bound to MemoizedChild",
+          "MemoizedChild must use PureComponent class syntax"
+        ],
+        "correctIndex": 0
+      },
+      {
+        "id": "fe-p2-2",
+        "difficulty": "HARD",
+        "skill": "Hydration & SSR",
+        "question": "What causes the 'Hydration failed because the initial UI does not match' error in Next.js?",
+        "snippet": "<span>{typeof window !== 'undefined' ? window.innerWidth : '0'}</span>",
+        "options": [
+          "Server renders '0' while client initial render calculates window width, causing DOM tree mismatch",
+          "window object is completely deprecated in Next.js 14+",
+          "The span tag cannot wrap dynamic JavaScript conditionals",
+          "Hydration requires all dynamic values to use Redux store"
+        ],
+        "correctIndex": 0
+      }
+    ]
+  },
+  "backend": {
+    "phase1": [
+      {
+        "id": "be-p1-1",
+        "difficulty": "EASY",
+        "skill": "HTTP Protocol & Idempotency",
+        "question": "Which HTTP method is required by REST spec to be strictly idempotent for full resource updates?",
+        "snippet": "PUT /api/v1/orders/1042 HTTP/1.1",
+        "options": [
+          "PUT",
+          "POST",
+          "PATCH",
+          "CONNECT"
+        ],
+        "correctIndex": 0
+      },
+      {
+        "id": "be-p1-2",
+        "difficulty": "MEDIUM",
+        "skill": "Database Indexing",
+        "question": "Given composite index (user_id, created_at), which PostgreSQL query CANNOT use index scanning efficiently?",
+        "snippet": "CREATE INDEX idx_user_created ON orders (user_id, created_at);",
+        "options": [
+          "SELECT * FROM orders WHERE created_at > NOW() - INTERVAL '1 day'",
+          "SELECT * FROM orders WHERE user_id = 450 AND created_at > '2026-01-01'",
+          "SELECT * FROM orders WHERE user_id = 90",
+          "SELECT * FROM orders WHERE user_id = 12 ORDER BY created_at DESC"
+        ],
+        "correctIndex": 0
+      }
+    ],
+    "phase2": [
+      {
+        "id": "be-p2-1",
+        "difficulty": "HARD",
+        "skill": "Distributed Concurrency",
+        "question": "How to prevent race conditions during simultaneous balance deductions in an ACID database?",
+        "snippet": "SELECT balance FROM accounts WHERE id = 101;\n-- Application checks balance >= 500\nUPDATE accounts SET balance = balance - 500 WHERE id = 101;",
+        "options": [
+          "Use SELECT FOR UPDATE or atomic decrement: WHERE id = 101 AND balance >= 500",
+          "Wrap the query in a simple setTimeout queue",
+          "Enable read-uncommitted isolation level",
+          "Change the column type from DECIMAL to BIGINT"
+        ],
+        "correctIndex": 0
+      }
+    ]
+  },
+  "medicine": {
+    "phase1": [
+      {
+        "id": "med-p1-1",
+        "difficulty": "MEDIUM",
+        "skill": "Emergency Management",
+        "question": "Patient 54M presents with severe crushing retrosternal chest pain. ECG shows ST elevation in leads II, III, and aVF. What is the contraindicated medication?",
+        "snippet": "BP: 88/54 mmHg, HR: 52 bpm, SpO2: 96% on room air.\nECG: Inferior wall STEMI with suspected Right Ventricular Infarction.",
+        "options": [
+          "Nitroglycerin (Sublingual nitrates cause fatal preload reduction in RV infarcts)",
+          "Aspirin 325 mg chewed",
+          "Unfractionated Heparin bolus",
+          "Normal Saline IV fluid challenge"
+        ],
+        "correctIndex": 0
+      },
+      {
+        "id": "med-p1-2",
+        "difficulty": "EASY",
+        "skill": "Pharmacology Baseline",
+        "question": "Which antimicrobial class is contraindicated in children under 8 due to enamel dysplasia and bone growth arrest?",
+        "snippet": "Patient 6F presents with atypical mycoplasma pneumonia.",
+        "options": [
+          "Tetracyclines (e.g. Doxycycline)",
+          "Macrolides (Azithromycin)",
+          "Penicillins (Amoxicillin)",
+          "Cephalosporins (Cefdinir)"
+        ],
+        "correctIndex": 0
+      }
+    ],
+    "phase2": [
+      {
+        "id": "med-p2-1",
+        "difficulty": "HARD",
+        "skill": "Critical ICU Resuscitation",
+        "question": "Septic shock patient remains hypotensive (MAP 55 mmHg) after 30 mL/kg crystalloid fluid resuscitation. First-line vasopressor is:",
+        "snippet": "CVP: 12 mmHg, ScvO2: 62%, Lactate: 4.8 mmol/L.",
+        "options": [
+          "Norepinephrine (Levophed)",
+          "Dopamine",
+          "Phenylephrine",
+          "Epinephrine bolus only"
+        ],
+        "correctIndex": 0
+      }
+    ]
+  },
+  "law": {
+    "phase1": [
+      {
+        "id": "law-p1-1",
+        "difficulty": "EASY",
+        "skill": "Contract Law",
+        "question": "Under contract jurisprudence, what is the legal effect of an agreement made without consideration?",
+        "snippet": "Party A promises to gift ₹10,00,000 to Party B orally without reciprocal obligation.",
+        "options": [
+          "Void ab initio (subject to natural love & affection statutory exceptions)",
+          "Fully enforceable in equity courts",
+          "Voidable solely at the option of the promisor",
+          "Valid if witnessed by one notary"
+        ],
+        "correctIndex": 0
+      }
+    ],
+    "phase2": [
+      {
+        "id": "law-p2-1",
+        "difficulty": "HARD",
+        "skill": "Corporate Disputes",
+        "question": "Which doctrine bars minority shareholders from bringing derivative claims if the alleged wrong is ratifiable by ordinary majority resolution?",
+        "snippet": "Foss v. Harbottle (1843) 2 Hare 461.",
+        "options": [
+          "Rule in Foss v. Harbottle (Proper Plaintiff Rule)",
+          "Doctrine of Ultra Vires",
+          "Turquand's Rule (Indoor Management)",
+          "Business Judgment Rule"
+        ],
+        "correctIndex": 0
+      }
+    ]
+  },
+  "aviation": {
+    "phase1": [
+      {
+        "id": "av-p1-1",
+        "difficulty": "MEDIUM",
+        "skill": "Aerodynamics & Recovery",
+        "question": "Aircraft enters an aerodynamic stall during a steep bank. The primary and immediate pilot corrective action is:",
+        "snippet": "Airspeed decaying below Vs, stick shaker active, nose high attitude.",
+        "options": [
+          "Reduce Angle of Attack (Push control column forward) and level wings",
+          "Pull back on stick to gain altitude immediately",
+          "Apply full opposite rudder without reducing pitch",
+          "Deploy full landing flaps immediately"
+        ],
+        "correctIndex": 0
+      }
+    ],
+    "phase2": [
+      {
+        "id": "av-p2-1",
+        "difficulty": "HARD",
+        "skill": "Engine Out Emergency",
+        "question": "During takeoff roll, critical engine fails at speed $V_1$. Correct protocol is:",
+        "snippet": "Runway length remaining: 1800m. Current speed: V1 achieved.",
+        "options": [
+          "Continue takeoff, rotate at Vr, maintain V2 climb profile",
+          "Abort takeoff and apply maximum reverse thrust",
+          "Deploy thrust reversers on remaining operative engine",
+          "Cut fuel mixture to all engines immediately"
+        ],
+        "correctIndex": 0
+      }
+    ]
+  },
+  "finance": {
+    "phase1": [
+      {
+        "id": "fin-p1-1",
+        "difficulty": "EASY",
+        "skill": "Financial Analysis",
+        "question": "Which valuation multiple is invariant to capital structure and debt/equity leverage differences?",
+        "snippet": "Target Company: 70% Debt, 30% Equity.",
+        "options": [
+          "EV / EBITDA (Enterprise Value to EBITDA)",
+          "Price to Earnings (P/E)",
+          "Price to Book (P/B)",
+          "Price to Sales (P/S)"
+        ],
+        "correctIndex": 0
+      }
+    ],
+    "phase2": [
+      {
+        "id": "fin-p2-1",
+        "difficulty": "HARD",
+        "skill": "Derivatives & Risk",
+        "question": "If an asset's price increases while implied volatility collapses, what happens to the delta of an out-of-the-money call option?",
+        "snippet": "Pre-earnings call options expiring in 2 days (Volatility crush scenario).",
+        "options": [
+          "Vega crush can cause net price drop despite underlying price increase",
+          "Delta automatically shifts to 1.0",
+          "Option price is guaranteed to increase by parity",
+          "Gamma turns strictly negative"
+        ],
+        "correctIndex": 0
+      }
+    ]
+  }
+}
