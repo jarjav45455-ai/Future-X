@@ -8,7 +8,7 @@ import {
 } from '../types/student';
 
 // Verified Physical Device IP for Expo Go
-const BASE_URL = 'http://10.154.2.102:5000';
+const BASE_URL = 'http://10.90.137.102:5000';
 const BACKEND_SYNTHESIZE_URL = `${BASE_URL}/api/careers/synthesize`;
 
 // ==========================================

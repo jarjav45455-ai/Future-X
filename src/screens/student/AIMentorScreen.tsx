@@ -30,7 +30,7 @@ interface ChatMessage {
 }
 
 // Verified Physical Device IP
-const BACKEND_URL = 'http://10.154.2.102:5000';
+const BACKEND_URL = 'http://10.90.137.102:5000';
 
 export const AIMentorScreen: React.FC<AIMentorScreenProps> = ({ profile, onBack }) => {
   const historyStorageKey = `@futurex_mentor_history_${profile.id || 'usr-001'}_${profile.targetRole.roleId}`;
