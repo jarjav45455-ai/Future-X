@@ -388,11 +388,15 @@ function runMigrationV3() {
 
 const { seed101Careers } = require('./seed101Careers');
 const { runOpportunityMigrationV4 } = require('./opportunityMigrations');
+const { runAssessmentMigrationV5 } = require('./assessmentMigrations');
+const { seedQuestionBank } = require('./seedQuestionBank');
 
 function initDatabase() {
   runMigrations();
   seedFromJsonBanks();
   seed101Careers(db);
+  runAssessmentMigrationV5(db);
+  seedQuestionBank(db);
   runMigrationV3();
   runOpportunityMigrationV4(db);
 }

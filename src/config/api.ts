@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export const API_BASE_URL =
-  process.env.EXPO_PUBLIC_API_URL?.replace(/\/$/, '') || 'http://10.90.137.102:5000';
+  process.env.EXPO_PUBLIC_API_URL?.replace(/\/$/, '') || 'http://192.168.85.51:5000';
 
 export const AUTH_TOKEN_KEY = '@futurex_access_token';
 export const REFRESH_TOKEN_KEY = '@futurex_refresh_token';

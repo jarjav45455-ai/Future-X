@@ -443,7 +443,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
   if (currentModuleScreen === 'AI Mentor') {
     return <AIMentorScreen profile={profile} onBack={() => setCurrentModuleScreen(null)} />;
   }
-  if (currentModuleScreen === 'Skill Check') {
+ if (currentModuleScreen === 'Skill Check') {
     return (
       <SkillCheckScreen
         profile={profile}
@@ -454,7 +454,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
           setPantherPopup({
             visible: true,
             mode: 'coach',
-            message: `Milestone Achieved! Phase 1 Mastered (>=90%) and Next Phase Unlocked on your Roadmap!`,
+            message: `Milestone Achieved! Phase mastered (90%+) and your Roadmap is now updated!`,
           });
         }}
       />

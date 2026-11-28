@@ -16,11 +16,13 @@ const careerExplorerRoutes = require('./routes/careerExplorerRoutes');
 const { generateAdaptiveRoadmap } = require('./services/roadmapEngine');
 const opportunityRoutes = require('./routes/opportunityRoutes');
 const { startOpportunityScheduler } = require('./services/opportunitySources');
+const assessmentRoutes = require('./routes/assessmentRoutes');
 
 initDatabase();
 app.use('/api', apiRateLimiter);
 app.use('/api', optionalAuth);
 app.use('/api/auth', authRoutes);
+app.use('/api/assess', assessmentRoutes);
 app.use('/api', careerExplorerRoutes);
 app.use('/api/opportunities', opportunityRoutes);
 startOpportunityScheduler(db);

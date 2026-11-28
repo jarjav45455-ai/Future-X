@@ -1,536 +1,775 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
+  ScrollView,
   TouchableOpacity,
   StyleSheet,
-  ScrollView,
   ActivityIndicator,
-  TextInput,
+  StatusBar,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { LinearGradient } from 'expo-linear-gradient';
 import {
-  ArrowRight,
-  ArrowLeft,
-  Award,
   CheckCircle2,
-  AlertTriangle,
-  RotateCcw,
+  XCircle,
+  AlertCircle,
   Sparkles,
+  RotateCcw,
+  ChevronRight,
+  ChevronLeft,
   ShieldCheck,
-  Code2,
-  BookOpen,
+  Clock,
+  Award,
+  History,
 } from 'lucide-react-native';
-
 import { FutureXHeader } from '../../components/common/FutureXHeader';
-import { StudentProfile, SkillItem, ProofItem } from '../../types/student';
-import { generatePhaseAssessment, submitPhaseAssessment } from '../../services/careerEngine';
-import { PantherDialoguePopup } from '../../components/panther/PantherDialoguePopup';
+import { apiRequest } from '../../config/api';
+import { StudentProfile } from '../../types/student';
+
+interface ExamQuestion {
+  id: string;
+  skillId: string;
+  skillName: string;
+  difficulty: string;
+  type: string;
+  text: string;
+  options: string[];
+}
+
+interface AttemptHistoryItem {
+  id: string;
+  phaseId: number;
+  score: number;
+  passed: boolean;
+  timestamp: string;
+}
+
+interface ExamResult {
+  attemptId: string;
+  careerId: string;
+  phaseId: number;
+  score: number;
+  totalQuestions: number;
+  percentage: number;
+  passed: boolean;
+  missingSkills: string[];
+  skillBreakdown: { skill: string; correct: number; total: number; percentage: number }[];
+  feedback: string;
+  progress: { currentPhase: number; status: string };
+}
 
 interface SkillCheckScreenProps {
   profile: StudentProfile;
   onBack: () => void;
-  onProfileUpdate?: (updated: StudentProfile) => void;
+  onProfileUpdate?: (updatedProfile: StudentProfile) => void;
 }
 
-interface AssessmentQuestion {
-  id: string;
-  type: string;
-  difficulty: 'EASY' | 'MEDIUM' | 'HARD';
-  skill: string;
-  question: string;
-  snippet?: string | null;
-  options: string[];
-}
+export const SkillCheckScreen: React.FC<SkillCheckScreenProps> = ({
+  profile,
+  onBack,
+  onProfileUpdate,
+}) => {
+  const careerId = profile.targetRole?.roleId || 'ai-engineer';
+  const careerTitle = profile.targetRole?.roleTitle || 'Target Role';
+  const totalCareerPhases = Math.max(3, (profile.roadmap || []).length);
 
-export const SkillCheckScreen: React.FC<SkillCheckScreenProps> = ({ profile, onBack, onProfileUpdate }) => {
-  const currentPhase = profile.roadmap.find((m) => m.status === 'current') || profile.roadmap[0];
-  const phaseSkills = profile.skills.map((s) => s.name).slice(0, 6);
-
-  const [loading, setLoading] = useState(true);
+  const [view, setView] = useState<'lobby' | 'exam' | 'result'>('lobby');
+  const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [questions, setQuestions] = useState<AssessmentQuestion[]>([]);
-  const [attemptId, setAttemptId] = useState('');
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const [userAnswers, setUserAnswers] = useState<Record<string, number>>({});
-  const [codeAnswers, setCodeAnswers] = useState<Record<string, string>>({});
-  const [isFinished, setIsFinished] = useState(false);
-  const [evaluationResult, setEvaluationResult] = useState<any>(null);
-  const [showPantherPopup, setShowPantherPopup] = useState(true);
-  const [testMode, setTestMode] = useState<'mastery' | 'practice'>('mastery');
+  const [errorMsg, setErrorMsg] = useState('');
+
+  // History & Progress
+  const [highestPhase, setHighestPhase] = useState<number>(1);
+  const [progressStatus, setProgressStatus] = useState<string>('in_progress');
+  const [history, setHistory] = useState<AttemptHistoryItem[]>([]);
+
+  // Active 30-Question Exam State
+  const [activePhase, setActivePhase] = useState<number>(1);
+  const [questions, setQuestions] = useState<ExamQuestion[]>([]);
+  const [currentIndex, setCurrentIndex] = useState<number>(0);
+  const [selectedAnswers, setSelectedAnswers] = useState<Record<string, string>>({});
+  const [examResult, setExamResult] = useState<ExamResult | null>(null);
+
+  const loadHistory = useCallback(async () => {
+    setLoading(true);
+    setErrorMsg('');
+    try {
+      const data = await apiRequest<{
+        success: boolean;
+        currentPhase: number;
+        status: string;
+        attempts: AttemptHistoryItem[];
+      }>(`/api/assess/history?careerId=${encodeURIComponent(careerId)}`);
+
+      setHighestPhase(Number(data.currentPhase || 1));
+      setProgressStatus(data.status || 'in_progress');
+      setHistory(data.attempts || []);
+    } catch (err: any) {
+      setErrorMsg(err?.message || 'Unable to load assessment history.');
+    } finally {
+      setLoading(false);
+    }
+  }, [careerId]);
 
   useEffect(() => {
-    initiateAssessment();
-  }, []);
+    loadHistory();
+  }, [loadHistory]);
 
-  const initiateAssessment = async () => {
+  const startPhaseExam = async (phaseToTake: number) => {
     setLoading(true);
+    setErrorMsg('');
     try {
-      const storedAttemptedIds = await AsyncStorage.getItem(`@futurex_attempted_qids_${profile.id}`);
-      const excludedQuestionIds = storedAttemptedIds ? JSON.parse(storedAttemptedIds) : [];
-
-      const res = await generatePhaseAssessment({
-        targetRole: profile.targetRole,
-        currentPhase,
-        phaseSkills,
-        excludedQuestionIds,
-        isPractice: testMode === 'practice',
+      const data = await apiRequest<{
+        success: boolean;
+        phaseId: number;
+        totalQuestions: number;
+        questions: ExamQuestion[];
+      }>('/api/assess/generate', {
+        method: 'POST',
+        body: { careerId, phaseId: phaseToTake },
       });
 
-      if (res && res.success && Array.isArray(res.questions) && res.questions.length > 0) {
-        setQuestions(res.questions);
-        setAttemptId(res.attemptId);
-        setCurrentIndex(0);
-        setUserAnswers({});
-        setCodeAnswers({});
-        setIsFinished(false);
-        setEvaluationResult(null);
-
-        const newIds = res.questions.map((q: any) => q.id);
-        const combined = [...new Set([...excludedQuestionIds, ...newIds])].slice(-200);
-        await AsyncStorage.setItem(`@futurex_attempted_qids_${profile.id}`, JSON.stringify(combined));
-      } else {
-        throw new Error('Fallback trigger');
-      }
-    } catch {
-      setQuestions([
-        {
-          id: 'fb-1',
-          type: 'mcq',
-          difficulty: 'EASY',
-          skill: phaseSkills[0] || 'Domain Knowledge',
-          question: `In the context of ${profile.targetRole.roleTitle}, what is the key verification deliverable for ${currentPhase?.title}?`,
-          options: [
-            currentPhase?.deliverable || 'Production Grade Case Artifact',
-            'Theoretical unverified whiteboard draft',
-            'Third-party untracked code snippet',
-            'Unstructured memory footprint',
-          ],
-        },
-        {
-          id: 'fb-2',
-          type: 'mcq',
-          difficulty: 'MEDIUM',
-          skill: phaseSkills[1] || 'System Architecture',
-          question: 'How do you prevent architectural regressions during multi-phase production deployment?',
-          options: [
-            'By enforcing automated regression test suites and type-safe interfaces',
-            'By bypassing integration sanity gates',
-            'By merging untested local changes directly to main',
-            'By disabling logging and telemetry monitors',
-          ],
-        },
-      ]);
-      setAttemptId(`local-${Date.now()}`);
+      setActivePhase(phaseToTake);
+      setQuestions(data.questions || []);
+      setCurrentIndex(0);
+      setSelectedAnswers({});
+      setExamResult(null);
+      setView('exam');
+    } catch (err: any) {
+      setErrorMsg(err?.message || 'Failed to generate 30-question exam.');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleSelectAnswer = (optIndex: number) => {
-    const q = questions[currentIndex];
-    setUserAnswers((prev) => ({ ...prev, [q.id]: optIndex }));
+  const handleSelectOption = (questionId: string, optionText: string) => {
+    setSelectedAnswers((prev) => ({ ...prev, [questionId]: optionText }));
   };
 
-  // ADVANCE SKILL MANAGEMENT (ASM) & PROOFPASS MERGE ENGINE
-  const synchronizeASMProfile = (
-    baseProfile: StudentProfile,
-    skillBreakdown: Array<{ skill: string; percentage: number }>,
-    isMastered: boolean,
-    overallScore: number
-  ): StudentProfile => {
-    const breakdownMap = new Map(
-      (skillBreakdown || []).map((sb) => [sb.skill.toLowerCase().trim(), sb.percentage])
-    );
-
-    // 1. Advance Skill Management: Upgrade individual skills state
-    const updatedSkills: SkillItem[] = baseProfile.skills.map((sk) => {
-      const matchScore = breakdownMap.get(sk.name.toLowerCase().trim());
-      if (matchScore !== undefined) {
-        const isSkillMastered = matchScore >= 75 || isMastered;
-        return {
-          ...sk,
-          proficiency: Math.max(sk.proficiency || 0, matchScore),
-          status: isSkillMastered ? 'Proof-Verified' : 'In Progress',
-          isGap: matchScore < 70,
-          verifiedBy: `${currentPhase.title} (Score: ${matchScore}%)`,
-          lastAssessed: '2026 Active',
-        };
-      }
-      return sk;
-    });
-
-    // 2. Cryptographic ProofPass Hash & Proof Item Minting
-    const candidateInitials = (baseProfile.name || 'ARJ').slice(0, 3).toUpperCase();
-    const mintedHash = `FX-PASS-2026-${candidateInitials}-${Math.max(baseProfile.readinessPercentage || 0, overallScore)}`;
-
-    const newProofItem: ProofItem = {
-      id: `proof-${Date.now()}`,
-      title: `${currentPhase.title} Rigor Verification`,
-      type: 'Assessment',
-      domain: baseProfile.targetRole.profession,
-      roleRef: baseProfile.targetRole.roleId,
-      status: isMastered ? 'Proof-Verified' : 'Assessed',
-      issuedBy: 'FutureX ASM Engine',
-      date: '2026 Cohort',
-      proofHash: mintedHash,
-      skillsDemonstrated: (skillBreakdown || []).map((s) => s.skill),
-    };
-
-    const existingProofs = (baseProfile.proofPass || []).filter(
-      (p) => !p.title.includes(currentPhase.title)
-    );
-
-    return {
-      ...baseProfile,
-      skills: updatedSkills,
-      proofPass: [newProofItem, ...existingProofs],
-      proofPassHash: mintedHash,
-      readinessPercentage: isMastered
-        ? Math.min(100, (baseProfile.readinessPercentage || 40) + 15)
-        : baseProfile.readinessPercentage,
-    };
-  };
-
-  const handleSubmit = async () => {
+  const handleSubmitExam = async () => {
     setSubmitting(true);
+    setErrorMsg('');
     try {
-      const res = await submitPhaseAssessment({
-        attemptId,
-        userAnswers,
-        currentProfile: profile,
+      const answersPayload = questions.map((q) => ({
+        questionId: q.id,
+        selectedAnswer: selectedAnswers[q.id] || '',
+      }));
+
+      const res = await apiRequest<ExamResult & { success: boolean }>('/api/assess/submit', {
+        method: 'POST',
+        body: {
+          careerId,
+          phaseId: activePhase,
+          answers: answersPayload,
+          totalCareerPhases,
+        },
       });
 
-      if (res && res.success) {
-        setEvaluationResult(res);
-        setIsFinished(true);
+      setExamResult(res);
+      setHighestPhase(res.progress.currentPhase);
+      setProgressStatus(res.progress.status);
+      setView('result');
 
-        const baseProfileToUpdate = res.updatedProfile || profile;
-        const fullySyncedProfile = synchronizeASMProfile(
-          baseProfileToUpdate,
-          res.skillBreakdown || [],
-          res.isPhaseMastered,
-          res.overallScore
-        );
+      // Sync unlocked phase back to StudentDashboard & Roadmap
+      if (res.passed && onProfileUpdate) {
+        const updatedRoadmap = (profile.roadmap || []).map((m: any) => {
+          const step = m.stepNumber || 1;
+          if (step < res.progress.currentPhase || res.progress.status === 'complete') {
+            return { ...m, status: 'completed', assessmentUnlocked: true };
+          }
+          if (step === res.progress.currentPhase) {
+            return { ...m, status: 'current', assessmentUnlocked: true };
+          }
+          return m;
+        });
 
-        if (onProfileUpdate) {
-          onProfileUpdate(fullySyncedProfile);
-        }
-      } else {
-        const score = 93;
-        const mockBreakdown = phaseSkills.map((sk) => ({ skill: sk, percentage: 93 }));
-        const mockResult = {
-          overallScore: score,
-          isPhaseMastered: true,
-          correctCount: questions.length,
-          totalQuestions: questions.length,
-          skillBreakdown: mockBreakdown,
-        };
-
-        setEvaluationResult(mockResult);
-        setIsFinished(true);
-
-        const fullySyncedProfile = synchronizeASMProfile(
-          profile,
-          mockBreakdown,
-          true,
-          score
-        );
-
-        if (onProfileUpdate) {
-          onProfileUpdate(fullySyncedProfile);
-        }
+        onProfileUpdate({
+          ...profile,
+          roadmap: updatedRoadmap,
+          readinessPercentage: Math.min(100, (profile.readinessPercentage || 0) + 15),
+        });
       }
-    } catch {
-      setIsFinished(true);
+
+      loadHistory();
+    } catch (err: any) {
+      setErrorMsg(err?.message || 'Failed to submit exam.');
     } finally {
       setSubmitting(false);
     }
   };
 
-  if (loading) {
+  // ==========================================
+  // VIEW 3: RESULT & FEEDBACK SCREEN
+  // ==========================================
+  if (view === 'result' && examResult) {
     return (
       <SafeAreaView style={styles.container}>
-        <FutureXHeader title="Skill Check" subtitle="Synthesizing Assessment..." onBack={onBack} />
-        <View style={styles.centerContainer}>
-          <ActivityIndicator size="large" color="#34d399" />
-          <Text style={styles.loadingHeading}>Assembling Adaptive Assessment</Text>
-          <Text style={styles.loadingSub}>
-            Generating fresh, non-duplicate questions aligned to {currentPhase?.title} for {profile.targetRole.roleTitle}...
-          </Text>
+        <StatusBar barStyle="light-content" />
+        <FutureXHeader
+          title={`Phase ${examResult.phaseId} Result`}
+          subtitle={`${careerTitle} • 90% Mastery Gate`}
+          onBack={() => setView('lobby')}
+        />
+
+        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+          <View
+            style={[
+              styles.resultHero,
+              examResult.passed ? styles.resultPass : styles.resultFail,
+            ]}
+          >
+            {examResult.passed ? (
+              <CheckCircle2 size={44} color="#34d399" />
+            ) : (
+              <XCircle size={44} color="#f43f5e" />
+            )}
+            <Text style={styles.resultScore}>
+              {examResult.score} / {examResult.totalQuestions}
+            </Text>
+            <Text style={styles.resultPct}>
+              {examResult.percentage}% • {examResult.passed ? 'PHASE MASTERED' : 'MASTERY NOT REACHED'}
+            </Text>
+            <Text style={styles.resultFeedback}>{examResult.feedback}</Text>
+          </View>
+
+          {!examResult.passed && examResult.missingSkills.length > 0 && (
+            <View style={styles.sectionCard}>
+              <Text style={styles.sectionTitle}>SKILLS TO REVIEW</Text>
+              <View style={styles.chipWrap}>
+                {examResult.missingSkills.map((sk, i) => (
+                  <View key={i} style={styles.missingChip}>
+                    <Text style={styles.missingChipText}>{sk}</Text>
+                  </View>
+                ))}
+              </View>
+            </View>
+          )}
+
+          {examResult.skillBreakdown.length > 0 && (
+            <View style={styles.sectionCard}>
+              <Text style={styles.sectionTitle}>SKILL BREAKDOWN</Text>
+              {examResult.skillBreakdown.map((item, idx) => (
+                <View key={idx} style={styles.breakdownRow}>
+                  <View style={styles.rowBetween}>
+                    <Text style={styles.breakdownName}>{item.skill}</Text>
+                    <Text
+                      style={[
+                        styles.breakdownPct,
+                        { color: item.percentage >= 80 ? '#34d399' : '#fb923c' },
+                      ]}
+                    >
+                      {item.correct}/{item.total} ({item.percentage}%)
+                    </Text>
+                  </View>
+                  <View style={styles.track}>
+                    <View
+                      style={[
+                        styles.fill,
+                        {
+                          width: `${item.percentage}%`,
+                          backgroundColor: item.percentage >= 80 ? '#34d399' : '#fb923c',
+                        },
+                      ]}
+                    />
+                  </View>
+                </View>
+              ))}
+            </View>
+          )}
+
+          <View style={styles.actionRow}>
+            <TouchableOpacity
+              style={styles.secondaryBtn}
+              onPress={() => startPhaseExam(examResult.phaseId)}
+            >
+              <RotateCcw size={16} color="#e2e8f0" />
+              <Text style={styles.secondaryBtnText}>Retake (New 30 Qs)</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.primaryBtnFlex} onPress={onBack}>
+              <LinearGradient
+                colors={['#6366f1', '#a855f7']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={styles.primaryGrad}
+              >
+                <Text style={styles.primaryBtnText}>Back to Dashboard</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
+
+  // ==========================================
+  // VIEW 2: ACTIVE 30-QUESTION EXAM
+  // ==========================================
+  if (view === 'exam' && questions.length > 0) {
+    const q = questions[currentIndex];
+    const answeredCount = Object.keys(selectedAnswers).length;
+    const isLast = currentIndex === questions.length - 1;
+    const progressPct = Math.round(((currentIndex + 1) / questions.length) * 100);
+
+    return (
+      <SafeAreaView style={styles.container}>
+        <StatusBar barStyle="light-content" />
+        <View style={styles.examTopBar}>
+          <TouchableOpacity style={styles.backBtn} onPress={() => setView('lobby')}>
+            <ChevronLeft size={18} color="#e2e8f0" />
+          </TouchableOpacity>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.examTopTitle}>
+              Phase {activePhase} Exam • Q{currentIndex + 1}/{questions.length}
+            </Text>
+            <Text style={styles.examTopSub}>
+              Answered: {answeredCount}/{questions.length} • Pass Gate: 27/30 (90%)
+            </Text>
+          </View>
+        </View>
+
+        <View style={styles.examProgressTrack}>
+          <View style={[styles.examProgressFill, { width: `${progressPct}%` }]} />
+        </View>
+
+        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+          <View style={styles.questionCard}>
+            <View style={styles.rowBetween}>
+              <Text style={styles.qSkillPill}>{q.skillName}</Text>
+              <Text style={styles.qDiffPill}>{q.difficulty}</Text>
+            </View>
+            <Text style={styles.qText}>{q.text}</Text>
+
+            <View style={{ marginTop: 16, gap: 10 }}>
+              {q.options.map((opt, idx) => {
+                const selected = selectedAnswers[q.id] === opt;
+                return (
+                  <TouchableOpacity
+                    key={idx}
+                    activeOpacity={0.8}
+                    style={[styles.optionBtn, selected && styles.optionBtnSelected]}
+                    onPress={() => handleSelectOption(q.id, opt)}
+                  >
+                    <View style={[styles.optIndex, selected && styles.optIndexSelected]}>
+                      <Text style={[styles.optIndexText, selected && { color: '#ffffff' }]}>
+                        {String.fromCharCode(65 + idx)}
+                      </Text>
+                    </View>
+                    <Text style={[styles.optText, selected && { color: '#ffffff', fontWeight: '700' }]}>
+                      {opt}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+
+          {errorMsg ? (
+            <View style={styles.errorBox}>
+              <AlertCircle size={15} color="#fda4af" />
+              <Text style={styles.errorText}>{errorMsg}</Text>
+            </View>
+          ) : null}
+        </ScrollView>
+
+        <View style={styles.examFooter}>
+          <TouchableOpacity
+            style={[styles.navBtn, currentIndex === 0 && { opacity: 0.4 }]}
+            disabled={currentIndex === 0}
+            onPress={() => setCurrentIndex((i) => Math.max(0, i - 1))}
+          >
+            <ChevronLeft size={16} color="#e2e8f0" />
+            <Text style={styles.navBtnText}>Prev</Text>
+          </TouchableOpacity>
+
+          {isLast ? (
+            <TouchableOpacity
+              style={[styles.submitBtn, submitting && { opacity: 0.7 }]}
+              disabled={submitting}
+              onPress={handleSubmitExam}
+            >
+              <LinearGradient
+                colors={['#059669', '#10b981']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={styles.submitGrad}
+              >
+                {submitting ? (
+                  <ActivityIndicator size="small" color="#ffffff" />
+                ) : (
+                  <>
+                    <ShieldCheck size={17} color="#ffffff" />
+                    <Text style={styles.submitBtnText}>Submit 30-Q Exam</Text>
+                  </>
+                )}
+              </LinearGradient>
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity
+              style={styles.nextBtn}
+              onPress={() => setCurrentIndex((i) => Math.min(questions.length - 1, i + 1))}
+            >
+              <Text style={styles.nextBtnText}>Next</Text>
+              <ChevronRight size={16} color="#ffffff" />
+            </TouchableOpacity>
+          )}
         </View>
       </SafeAreaView>
     );
   }
 
-  const currentQ = questions[currentIndex];
-  const isLast = currentIndex === questions.length - 1;
-  const isAnswered = currentQ && userAnswers[currentQ.id] !== undefined;
-
+  // ==========================================
+  // VIEW 1: LOBBY & ATTEMPT HISTORY
+  // ==========================================
   return (
     <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="light-content" />
       <FutureXHeader
-        title="Skill Check"
-        subtitle={`${currentPhase?.title || 'Phase Assessment'} • ${profile.targetRole.roleTitle}`}
+        title="30-Question Skill Check"
+        subtitle={`${careerTitle} • 90% Mastery Gate`}
         onBack={onBack}
       />
 
-      {!isFinished ? (
-        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-          {/* Progress Header */}
-          <View style={styles.quizHeader}>
-            <View style={styles.headerLeft}>
-              <View style={styles.badgeDifficulty}>
-                <Text style={styles.badgeDiffText}>{currentQ.difficulty}</Text>
-              </View>
-              <Text style={styles.badgeSkill}>{currentQ.skill}</Text>
-            </View>
-            <Text style={styles.questionCounter}>
-              Q{currentIndex + 1} of {questions.length}
-            </Text>
-          </View>
-
-          {/* Question Grid Bar */}
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.qGridTrack}>
-            {questions.map((q, idx) => {
-              const answered = userAnswers[q.id] !== undefined;
-              const active = idx === currentIndex;
-              return (
-                <TouchableOpacity
-                  key={q.id}
-                  style={[styles.qDot, answered && styles.qDotAnswered, active && styles.qDotActive]}
-                  onPress={() => setCurrentIndex(idx)}
-                >
-                  <Text style={[styles.qDotText, active && { color: '#fff', fontWeight: '800' }]}>{idx + 1}</Text>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
-
-          {/* Question Card */}
-          <View style={styles.questionCard}>
-            <Text style={styles.questionText}>{currentQ.question}</Text>
-
-            {currentQ.snippet ? (
-              <View style={styles.snippetBox}>
-                <View style={styles.snippetHeader}>
-                  <Code2 size={12} color="#34d399" />
-                  <Text style={styles.snippetTitle}>EXHIBIT / CODE SNIPPET</Text>
-                </View>
-                <Text style={styles.snippetText}>{currentQ.snippet}</Text>
-              </View>
-            ) : null}
-
-            {/* Options with Null-Safety Guard */}
-            <View style={styles.optionsWrap}>
-              {(currentQ?.options || []).length > 0 ? (
-                currentQ.options.map((opt, i) => {
-                  const selected = userAnswers[currentQ.id] === i;
-                  return (
-                    <TouchableOpacity
-                      key={i}
-                      activeOpacity={0.8}
-                      style={[styles.optButton, selected && styles.optButtonActive]}
-                      onPress={() => handleSelectAnswer(i)}
-                    >
-                      <View style={[styles.optRadio, selected && styles.optRadioActive]}>
-                        {selected && <View style={styles.optRadioInner} />}
-                      </View>
-                      <Text style={[styles.optText, selected && styles.optTextActive]}>{opt}</Text>
-                    </TouchableOpacity>
-                  );
-                })
-              ) : (
-                <View style={{ padding: 12 }}>
-                  <Text style={{ color: '#94a3b8', fontSize: 12, fontStyle: 'italic' }}>
-                    Select an evaluation response or review concept.
-                  </Text>
-                </View>
-              )}
-            </View>
-          </View>
-
-          {/* Navigation Controls */}
-          <View style={styles.navRow}>
-            <TouchableOpacity
-              style={[styles.prevBtn, currentIndex === 0 && { opacity: 0.4 }]}
-              disabled={currentIndex === 0}
-              onPress={() => setCurrentIndex((prev) => Math.max(0, prev - 1))}
-            >
-              <ArrowLeft size={16} color="#cbd5e1" />
-              <Text style={styles.prevBtnText}>Previous</Text>
-            </TouchableOpacity>
-
-            {!isLast ? (
-              <TouchableOpacity
-                style={[styles.nextBtn, !isAnswered && { opacity: 0.5 }]}
-                disabled={!isAnswered}
-                onPress={() => setCurrentIndex((prev) => Math.min(questions.length - 1, prev + 1))}
-              >
-                <Text style={styles.nextBtnText}>Next Question</Text>
-                <ArrowRight size={16} color="#fff" />
-              </TouchableOpacity>
-            ) : (
-              <TouchableOpacity
-                style={[styles.submitBtn, submitting && { opacity: 0.7 }]}
-                disabled={submitting}
-                onPress={handleSubmit}
-              >
-                {submitting ? (
-                  <ActivityIndicator size="small" color="#fff" />
-                ) : (
-                  <>
-                    <ShieldCheck size={16} color="#fff" />
-                    <Text style={styles.submitBtnText}>Submit Assessment</Text>
-                  </>
-                )}
-              </TouchableOpacity>
-            )}
-          </View>
-        </ScrollView>
+      {loading ? (
+        <View style={styles.centerBox}>
+          <ActivityIndicator size="large" color="#c084fc" />
+          <Text style={styles.loadingText}>Preparing 30-question exam engine...</Text>
+        </View>
       ) : (
-        /* PREMIUM RESULTS & ROADMAP UNLOCK SCREEN */
-        <ScrollView contentContainerStyle={styles.resultContainer} showsVerticalScrollIndicator={false}>
-          <View style={[styles.resultCard, evaluationResult?.isPhaseMastered && styles.resultCardMastered]}>
-            <View style={styles.scoreDialWrap}>
-              <Text style={styles.scorePercentage}>{evaluationResult?.overallScore || 0}%</Text>
-              <Text style={styles.scoreLabel}>OVERALL ACCURACY</Text>
+        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+          {/* Hero Gate Card */}
+          <View style={styles.heroCard}>
+            <LinearGradient
+              colors={['rgba(168, 85, 247, 0.22)', 'rgba(56, 189, 248, 0.06)']}
+              style={StyleSheet.absoluteFill}
+            />
+            <View style={styles.rowBetween}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.heroEyebrow}>PHASE MASTERY GATE</Text>
+                <Text style={styles.heroTitle}>
+                  {progressStatus === 'complete'
+                    ? 'All Phases Complete'
+                    : `Assess Phase ${highestPhase}`}
+                </Text>
+              </View>
+              <Award size={28} color="#34d399" />
             </View>
 
-            {evaluationResult?.isPhaseMastered ? (
-              <View style={styles.masteryBanner}>
-                <Award size={20} color="#34d399" />
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.masteryTitle}>PHASE 100% MASTERED!</Text>
-                  <Text style={styles.masterySub}>
-                    Achieved &ge;90% overall score. {currentPhase.title} is now marked as Completed, ASM competencies are
-                    Proof-Verified, and the Next Phase is unlocked!
-                  </Text>
-                </View>
-              </View>
-            ) : (
-              <View style={styles.improveBanner}>
-                <AlertTriangle size={20} color="#fb923c" />
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.improveTitle}>ROADMAP PHASE IN PROGRESS</Text>
-                  <Text style={styles.improveSub}>
-                    Phase mastery requires &ge;90% accuracy with strong core skill coverage. Strengthen your identified
-                    skill gaps before retaking.
-                  </Text>
-                </View>
-              </View>
-            )}
+            <Text style={styles.heroDesc}>
+              30 randomized, unseen-first questions mapped to your {careerTitle} skills. Score at least 27/30 (90%) to unlock the next phase.
+            </Text>
 
-            {/* Skill Breakdown */}
-            <View style={styles.breakdownSection}>
-              <Text style={styles.breakdownHeading}>ASM Competency Telemetry</Text>
-              {(evaluationResult?.skillBreakdown || []).map((sb: any, idx: number) => (
-                <View key={idx} style={styles.skillRow}>
+            <TouchableOpacity
+              style={styles.startBtn}
+              activeOpacity={0.85}
+              onPress={() => startPhaseExam(highestPhase)}
+            >
+              <LinearGradient
+                colors={['#6366f1', '#a855f7']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={styles.primaryGrad}
+              >
+                <Sparkles size={17} color="#ffffff" />
+                <Text style={styles.primaryBtnText}>
+                  {progressStatus === 'complete'
+                    ? `Retake Phase ${highestPhase} (30 Qs)`
+                    : `Start Phase ${highestPhase} Exam (30 Qs)`}
+                </Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          </View>
+
+          {errorMsg ? (
+            <View style={styles.errorBox}>
+              <AlertCircle size={15} color="#fda4af" />
+              <Text style={styles.errorText}>{errorMsg}</Text>
+            </View>
+          ) : null}
+
+          {/* Past Attempt History */}
+          <View style={styles.sectionCard}>
+            <View style={styles.row}>
+              <History size={15} color="#c084fc" />
+              <Text style={[styles.sectionTitle, { marginLeft: 7 }]}>
+                PAST ATTEMPT HISTORY ({history.length})
+              </Text>
+            </View>
+
+            {history.length === 0 ? (
+              <Text style={styles.emptyHistText}>
+                No attempts yet. Complete Phase 1 exam to record your verified score.
+              </Text>
+            ) : (
+              history.map((att) => (
+                <View key={att.id} style={styles.histRow}>
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.skillRowName}>{sb.skill}</Text>
-                    <View style={styles.skillProgressTrack}>
-                      <View style={[styles.skillProgressFill, { width: `${sb.percentage}%` }]} />
+                    <Text style={styles.histTitle}>
+                      Phase {att.phaseId} • {att.score}/30 ({Math.round((att.score / 30) * 100)}%)
+                    </Text>
+                    <View style={[styles.row, { marginTop: 3 }]}>
+                      <Clock size={11} color="#94a3b8" />
+                      <Text style={styles.histDate}>
+                        {new Date(att.timestamp).toLocaleString('en-IN')}
+                      </Text>
                     </View>
                   </View>
-                  <Text style={[styles.skillRowScore, sb.percentage >= 75 ? { color: '#34d399' } : { color: '#f87171' }]}>
-                    {sb.percentage}%
-                  </Text>
+                  <View
+                    style={[
+                      styles.histBadge,
+                      att.passed ? styles.histBadgePass : styles.histBadgeFail,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.histBadgeText,
+                        { color: att.passed ? '#34d399' : '#fda4af' },
+                      ]}
+                    >
+                      {att.passed ? 'PASSED' : 'RETRY'}
+                    </Text>
+                  </View>
                 </View>
-              ))}
-            </View>
-
-            {/* Action Buttons */}
-            <View style={styles.resultActions}>
-              <TouchableOpacity style={styles.continueBtn} onPress={onBack}>
-                <Sparkles size={16} color="#fff" />
-                <Text style={styles.continueBtnText}>
-                  {evaluationResult?.isPhaseMastered ? 'View Updated Dashboard & ProofPass' : 'Back to Dashboard'}
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity style={styles.retakeBtn} onPress={initiateAssessment}>
-                <RotateCcw size={15} color="#94a3b8" />
-                <Text style={styles.retakeBtnText}>Generate Fresh Assessment</Text>
-              </TouchableOpacity>
-            </View>
+              ))
+            )}
           </View>
         </ScrollView>
       )}
-
-      <PantherDialoguePopup
-        visible={showPantherPopup}
-        mode="coach"
-        tagline="COACH DIAGNOSTIC ACTIVE"
-        message={`Arjav, every question in this assessment is synthesized for ${profile.targetRole.roleTitle} (${currentPhase.title}). Score >=90% to unlock the next roadmap milestone!`}
-        onDismiss={() => setShowPantherPopup(false)}
-      />
     </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#05030a' },
-  centerContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
-  loadingHeading: { color: '#fff', fontSize: 16, fontWeight: '700', marginTop: 14 },
-  loadingSub: { color: '#94a3b8', fontSize: 12, textAlign: 'center', marginTop: 6, lineHeight: 18 },
-  content: { padding: 16, gap: 14, paddingBottom: 40 },
-  quizHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  badgeDifficulty: { backgroundColor: 'rgba(52, 211, 153, 0.15)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
-  badgeDiffText: { color: '#34d399', fontSize: 10, fontWeight: '800' },
-  badgeSkill: { color: '#c084fc', fontSize: 12, fontWeight: '600' },
-  questionCounter: { color: '#94a3b8', fontSize: 12, fontWeight: '700' },
-  qGridTrack: { flexDirection: 'row', gap: 6, paddingVertical: 4 },
-  qDot: { width: 30, height: 30, borderRadius: 8, backgroundColor: 'rgba(255, 255, 255, 0.05)', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.08)' },
-  qDotAnswered: { backgroundColor: 'rgba(168, 85, 247, 0.2)', borderColor: '#a855f7' },
-  qDotActive: { borderColor: '#34d399', backgroundColor: 'rgba(52, 211, 153, 0.2)' },
-  qDotText: { color: '#94a3b8', fontSize: 11, fontWeight: '600' },
-  questionCard: { backgroundColor: '#120d24', borderRadius: 18, padding: 18, borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.08)', gap: 14 },
-  questionText: { color: '#fff', fontSize: 15, fontWeight: '700', lineHeight: 22 },
-  snippetBox: { backgroundColor: '#090514', borderRadius: 10, padding: 12, borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.06)' },
-  snippetHeader: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 },
-  snippetTitle: { color: '#34d399', fontSize: 10, fontWeight: '800' },
-  snippetText: { color: '#cbd5e1', fontSize: 12, fontFamily: 'monospace', lineHeight: 16 },
-  optionsWrap: { gap: 10 },
-  optButton: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: 'rgba(255, 255, 255, 0.04)', padding: 14, borderRadius: 12, borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.08)' },
-  optButtonActive: { borderColor: '#a855f7', backgroundColor: 'rgba(168, 85, 247, 0.12)' },
-  optRadio: { width: 18, height: 18, borderRadius: 9, borderWidth: 1.5, borderColor: '#64748b', justifyContent: 'center', alignItems: 'center' },
-  optRadioActive: { borderColor: '#c084fc' },
-  optRadioInner: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#c084fc' },
+  row: { flexDirection: 'row', alignItems: 'center' },
+  rowBetween: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  scrollContent: { padding: 16, paddingBottom: 110 },
+  centerBox: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 10 },
+  loadingText: { color: '#94a3b8', fontSize: 12 },
+  heroCard: {
+    borderRadius: 20,
+    overflow: 'hidden',
+    padding: 18,
+    backgroundColor: '#110b20',
+    borderWidth: 1,
+    borderColor: 'rgba(192, 132, 252, 0.3)',
+    marginBottom: 16,
+  },
+  heroEyebrow: { color: '#c084fc', fontSize: 10, fontWeight: '800', letterSpacing: 0.9 },
+  heroTitle: { color: '#ffffff', fontSize: 20, fontWeight: '800', marginTop: 4 },
+  heroDesc: { color: '#cbd5e1', fontSize: 12, lineHeight: 18, marginTop: 10 },
+  startBtn: { borderRadius: 14, overflow: 'hidden', marginTop: 16 },
+  primaryGrad: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 14,
+  },
+  primaryBtnText: { color: '#ffffff', fontSize: 14, fontWeight: '800' },
+  sectionCard: {
+    backgroundColor: '#110b20',
+    borderRadius: 18,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    marginBottom: 14,
+  },
+  sectionTitle: { color: '#94a3b8', fontSize: 10, fontWeight: '800', letterSpacing: 0.8 },
+  emptyHistText: { color: '#64748b', fontSize: 12, marginTop: 10 },
+  histRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.06)',
+  },
+  histTitle: { color: '#ffffff', fontSize: 13, fontWeight: '700' },
+  histDate: { color: '#94a3b8', fontSize: 11, marginLeft: 5 },
+  histBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
+  histBadgePass: { backgroundColor: 'rgba(52, 211, 153, 0.14)' },
+  histBadgeFail: { backgroundColor: 'rgba(244, 63, 94, 0.14)' },
+  histBadgeText: { fontSize: 10, fontWeight: '800' },
+  examTopBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  backBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.07)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  examTopTitle: { color: '#ffffff', fontSize: 15, fontWeight: '800' },
+  examTopSub: { color: '#94a3b8', fontSize: 11, marginTop: 2 },
+  examProgressTrack: { height: 4, backgroundColor: 'rgba(255,255,255,0.08)' },
+  examProgressFill: { height: '100%', backgroundColor: '#c084fc' },
+  questionCard: {
+    backgroundColor: '#110b20',
+    borderRadius: 18,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.09)',
+  },
+  qSkillPill: {
+    color: '#38bdf8',
+    fontSize: 10,
+    fontWeight: '800',
+    backgroundColor: 'rgba(56, 189, 248, 0.14)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  qDiffPill: { color: '#94a3b8', fontSize: 10, fontWeight: '700' },
+  qText: { color: '#ffffff', fontSize: 15, fontWeight: '700', lineHeight: 22, marginTop: 12 },
+  optionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 12,
+    padding: 12,
+  },
+  optionBtnSelected: {
+    backgroundColor: 'rgba(168, 85, 247, 0.22)',
+    borderColor: '#c084fc',
+  },
+  optIndex: {
+    width: 26,
+    height: 26,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  optIndexSelected: { backgroundColor: '#9333ea' },
+  optIndexText: { color: '#94a3b8', fontSize: 12, fontWeight: '800' },
   optText: { color: '#cbd5e1', fontSize: 13, flex: 1, lineHeight: 18 },
-  optTextActive: { color: '#fff', fontWeight: '600' },
-  navRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 },
-  prevBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 16, paddingVertical: 12, borderRadius: 12, backgroundColor: 'rgba(255, 255, 255, 0.05)' },
-  prevBtnText: { color: '#cbd5e1', fontSize: 13, fontWeight: '600' },
-  nextBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 18, paddingVertical: 12, borderRadius: 12, backgroundColor: '#8b5cf6' },
-  nextBtnText: { color: '#fff', fontSize: 13, fontWeight: '700' },
-  submitBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 18, paddingVertical: 12, borderRadius: 12, backgroundColor: '#10b981' },
-  submitBtnText: { color: '#fff', fontSize: 13, fontWeight: '700' },
-  resultContainer: { padding: 16, paddingBottom: 40 },
-  resultCard: { backgroundColor: '#120d24', borderRadius: 20, padding: 20, borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.08)', gap: 16 },
-  resultCardMastered: { borderColor: 'rgba(52, 211, 153, 0.4)' },
-  scoreDialWrap: { alignItems: 'center', paddingVertical: 10 },
-  scorePercentage: { color: '#fff', fontSize: 44, fontWeight: '900' },
-  scoreLabel: { color: '#94a3b8', fontSize: 10, fontWeight: '800', letterSpacing: 1 },
-  masteryBanner: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: 'rgba(52, 211, 153, 0.12)', borderWidth: 1, borderColor: 'rgba(52, 211, 153, 0.3)', borderRadius: 14, padding: 14 },
-  masteryTitle: { color: '#34d399', fontSize: 13, fontWeight: '800' },
-  masterySub: { color: '#cbd5e1', fontSize: 11, marginTop: 2, lineHeight: 16 },
-  improveBanner: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: 'rgba(251, 146, 60, 0.12)', borderWidth: 1, borderColor: 'rgba(251, 146, 60, 0.3)', borderRadius: 14, padding: 14 },
-  improveTitle: { color: '#fb923c', fontSize: 13, fontWeight: '800' },
-  improveSub: { color: '#cbd5e1', fontSize: 11, marginTop: 2, lineHeight: 16 },
-  breakdownSection: { gap: 10 },
-  breakdownHeading: { color: '#fff', fontSize: 13, fontWeight: '700' },
-  skillRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  skillRowName: { color: '#cbd5e1', fontSize: 11, fontWeight: '600', marginBottom: 4 },
-  skillProgressTrack: { height: 6, borderRadius: 3, backgroundColor: 'rgba(255, 255, 255, 0.08)', overflow: 'hidden' },
-  skillProgressFill: { height: '100%', backgroundColor: '#a855f7', borderRadius: 3 },
-  skillRowScore: { fontSize: 12, fontWeight: '800' },
-  resultActions: { gap: 10, marginTop: 10 },
-  continueBtn: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8, backgroundColor: '#8b5cf6', paddingVertical: 14, borderRadius: 14 },
-  continueBtnText: { color: '#fff', fontSize: 14, fontWeight: '700' },
-  retakeBtn: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 6, backgroundColor: 'rgba(255, 255, 255, 0.05)', paddingVertical: 12, borderRadius: 14 },
-  retakeBtnText: { color: '#94a3b8', fontSize: 12, fontWeight: '600' },
+  examFooter: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: 'rgba(5, 3, 10, 0.96)',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.09)',
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 38,
+  },
+  navBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.07)',
+  },
+  navBtnText: { color: '#e2e8f0', fontSize: 13, fontWeight: '700' },
+  nextBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    paddingVertical: 12,
+    borderRadius: 12,
+    backgroundColor: '#9333ea',
+  },
+  nextBtnText: { color: '#ffffff', fontSize: 14, fontWeight: '800' },
+  submitBtn: { flex: 1, borderRadius: 12, overflow: 'hidden' },
+  submitGrad: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 13,
+  },
+  submitBtnText: { color: '#ffffff', fontSize: 14, fontWeight: '800' },
+  resultHero: {
+    alignItems: 'center',
+    borderRadius: 20,
+    padding: 22,
+    borderWidth: 1,
+    marginBottom: 16,
+  },
+  resultPass: {
+    backgroundColor: 'rgba(52, 211, 153, 0.1)',
+    borderColor: 'rgba(52, 211, 153, 0.4)',
+  },
+  resultFail: {
+    backgroundColor: 'rgba(244, 63, 94, 0.1)',
+    borderColor: 'rgba(244, 63, 94, 0.4)',
+  },
+  resultScore: { color: '#ffffff', fontSize: 32, fontWeight: '900', marginTop: 10 },
+  resultPct: { color: '#cbd5e1', fontSize: 12, fontWeight: '800', marginTop: 4 },
+  resultFeedback: {
+    color: '#e2e8f0',
+    fontSize: 13,
+    textAlign: 'center',
+    marginTop: 10,
+    lineHeight: 19,
+  },
+  chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 },
+  missingChip: {
+    backgroundColor: 'rgba(244, 63, 94, 0.16)',
+    borderWidth: 1,
+    borderColor: 'rgba(244, 63, 94, 0.4)',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+  },
+  missingChipText: { color: '#fda4af', fontSize: 11, fontWeight: '700' },
+  breakdownRow: { marginTop: 10 },
+  breakdownName: { color: '#e2e8f0', fontSize: 12, fontWeight: '600' },
+  breakdownPct: { fontSize: 11, fontWeight: '800' },
+  track: {
+    height: 6,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 3,
+    marginTop: 4,
+    overflow: 'hidden',
+  },
+  fill: { height: '100%', borderRadius: 3 },
+  actionRow: { flexDirection: 'row', gap: 10, marginTop: 6 },
+  secondaryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  secondaryBtnText: { color: '#e2e8f0', fontSize: 12, fontWeight: '700' },
+  primaryBtnFlex: { flex: 1, borderRadius: 14, overflow: 'hidden' },
+  errorBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(244, 63, 94, 0.14)',
+    borderWidth: 1,
+    borderColor: 'rgba(244, 63, 94, 0.4)',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 12,
+  },
+  errorText: { color: '#fda4af', fontSize: 12, flex: 1 },
 });
 
 export default SkillCheckScreen;

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -23,7 +23,16 @@ import {
   Award,
 } from 'lucide-react-native';
 import { FutureXHeader } from '../../components/common/FutureXHeader';
+import { apiRequest } from '../../config/api';
 import { StudentProfile } from '../../types/student';
+
+interface AttemptRecord {
+  id: string;
+  phaseId: number;
+  score: number;
+  passed: boolean;
+  timestamp: string;
+}
 
 interface RoadmapScreenProps {
   profile: StudentProfile;
@@ -37,13 +46,51 @@ export const RoadmapScreen: React.FC<RoadmapScreenProps> = ({
   onNavigateToSkillCheck,
 }) => {
   const roadmap: any[] = Array.isArray(profile.roadmap) ? profile.roadmap : [];
-  const [expandedPhase, setExpandedPhase] = useState<number>(1);
+  const careerId = profile.targetRole?.roleId || 'ai-engineer';
 
-  const completedCount = roadmap.filter((p) => p.status === 'completed').length;
+  const [expandedPhase, setExpandedPhase] = useState<number>(1);
+  const [highestPhase, setHighestPhase] = useState<number>(1);
+  const [progressStatus, setProgressStatus] = useState<'in_progress' | 'complete'>('in_progress');
+  const [attempts, setAttempts] = useState<AttemptRecord[]>([]);
+
+  // Live sync with SQLite student_phase_progress & attempt history
+  useEffect(() => {
+    let active = true;
+    apiRequest<{
+      success: boolean;
+      currentPhase: number;
+      status: 'in_progress' | 'complete';
+      attempts: AttemptRecord[];
+    }>(`/api/assess/history?careerId=${encodeURIComponent(careerId)}`)
+      .then((data) => {
+        if (!active || !data?.success) return;
+        const unlocked = Number(data.currentPhase || 1);
+        setHighestPhase(unlocked);
+        setProgressStatus(data.status === 'complete' ? 'complete' : 'in_progress');
+        setAttempts(Array.isArray(data.attempts) ? data.attempts : []);
+        setExpandedPhase(unlocked);
+      })
+      .catch(() => {
+        // Offline fallback: derive current phase from local roadmap
+        const localCurrent = roadmap.find((p) => p.status === 'current');
+        if (localCurrent?.stepNumber) {
+          setHighestPhase(Number(localCurrent.stepNumber));
+          setExpandedPhase(Number(localCurrent.stepNumber));
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [careerId]);
+
   const totalPhases = roadmap.length;
+  const completedCount =
+    progressStatus === 'complete'
+      ? totalPhases
+      : roadmap.filter((p, idx) => (p.stepNumber || idx + 1) < highestPhase || p.status === 'completed').length;
   const progressPct = totalPhases > 0 ? Math.round((completedCount / totalPhases) * 100) : 0;
 
-  // Skills the student already rated >= target (fast-tracked)
   const fastTrackedSkills = (profile.skills || []).filter(
     (s) => !s.isGap && (s.proficiency || 0) >= (s.targetBenchmark || 80)
   );
@@ -62,6 +109,19 @@ export const RoadmapScreen: React.FC<RoadmapScreenProps> = ({
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
+        {/* All Phases Complete Banner */}
+        {progressStatus === 'complete' && totalPhases > 0 && (
+          <View style={styles.allDoneBanner}>
+            <Award size={20} color="#34d399" />
+            <View style={{ flex: 1, marginLeft: 10 }}>
+              <Text style={styles.allDoneTitle}>All Phases Complete</Text>
+              <Text style={styles.allDoneSub}>
+                Every phase mastery gate (90%+) for {profile.targetRole?.roleTitle} is verified.
+              </Text>
+            </View>
+          </View>
+        )}
+
         {/* Summary Hero Banner */}
         <View style={styles.heroCard}>
           <LinearGradient
@@ -100,7 +160,6 @@ export const RoadmapScreen: React.FC<RoadmapScreenProps> = ({
             </View>
           </View>
 
-          {/* Progress Bar */}
           <View style={styles.progressTrack}>
             <View
               style={[
@@ -111,7 +170,7 @@ export const RoadmapScreen: React.FC<RoadmapScreenProps> = ({
           </View>
         </View>
 
-        {/* Fast-Tracked Skills Strip (if user already knows some skills) */}
+        {/* Fast-Tracked Skills Strip */}
         {fastTrackedSkills.length > 0 && (
           <View style={styles.fastTrackCard}>
             <View style={styles.row}>
@@ -132,16 +191,20 @@ export const RoadmapScreen: React.FC<RoadmapScreenProps> = ({
 
         {/* Phase Timeline Cards */}
         {roadmap.map((phase, idx) => {
-          const stepNum = phase.stepNumber || idx + 1;
-          const isCurrent = phase.status === 'current';
-          const isCompleted = phase.status === 'completed';
-          const isLocked = !isCurrent && !isCompleted;
+          const stepNum = Number(phase.stepNumber || idx + 1);
+          const isCompleted =
+            progressStatus === 'complete' ||
+            stepNum < highestPhase ||
+            phase.status === 'completed';
+          const isCurrent = !isCompleted && stepNum === highestPhase;
+          const isLocked = !isCompleted && !isCurrent;
           const isExpanded = expandedPhase === stepNum || isCurrent;
           const phaseSkills: any[] = Array.isArray(phase.skills) ? phase.skills : [];
+          const phaseAttempts = attempts.filter((a) => Number(a.phaseId) === stepNum);
+          const latestAttempt = phaseAttempts[0] || null;
 
           return (
             <View key={phase.id || stepNum} style={styles.phaseWrapper}>
-              {/* Vertical Connector Line */}
               {idx < roadmap.length - 1 && <View style={styles.connectorLine} />}
 
               <View
@@ -149,9 +212,9 @@ export const RoadmapScreen: React.FC<RoadmapScreenProps> = ({
                   styles.phaseCard,
                   isCurrent && styles.phaseCardCurrent,
                   isCompleted && styles.phaseCardCompleted,
+                  isLocked && styles.phaseCardLocked,
                 ]}
               >
-                {/* Phase Header (Tap to Expand/Collapse) */}
                 <TouchableOpacity
                   activeOpacity={0.8}
                   onPress={() =>
@@ -186,10 +249,10 @@ export const RoadmapScreen: React.FC<RoadmapScreenProps> = ({
                             ]}
                           >
                             {isCompleted
-                              ? 'COMPLETED'
+                              ? `PHASE ${stepNum} COMPLETED`
                               : isCurrent
-                                ? 'ACTIVE PHASE'
-                                : 'UPCOMING'}
+                                ? 'CURRENT PHASE'
+                                : 'LOCKED'}
                           </Text>
                           <View style={[styles.row, { marginLeft: 8 }]}>
                             <Clock size={11} color="#94a3b8" />
@@ -210,10 +273,8 @@ export const RoadmapScreen: React.FC<RoadmapScreenProps> = ({
                   <Text style={styles.phaseSubtitle}>{phase.subtitle}</Text>
                 </TouchableOpacity>
 
-                {/* Expanded Phase Details */}
                 {isExpanded && (
                   <View style={styles.expandedBody}>
-                    {/* Prerequisite DAG Chain */}
                     {Array.isArray(phase.prerequisites) && phase.prerequisites.length > 0 && (
                       <View style={styles.prereqBox}>
                         <GitBranch size={13} color="#fbbf24" />
@@ -223,7 +284,6 @@ export const RoadmapScreen: React.FC<RoadmapScreenProps> = ({
                       </View>
                     )}
 
-                    {/* Exact Skills Mapped to This Phase */}
                     {phaseSkills.length > 0 && (
                       <View style={{ marginTop: 10 }}>
                         <Text style={styles.miniHeading}>
@@ -268,7 +328,6 @@ export const RoadmapScreen: React.FC<RoadmapScreenProps> = ({
                       </View>
                     )}
 
-                    {/* Concrete Phase Deliverable */}
                     <View style={styles.deliverableBox}>
                       <Sparkles size={14} color="#c084fc" />
                       <View style={{ flex: 1, marginLeft: 8 }}>
@@ -277,7 +336,18 @@ export const RoadmapScreen: React.FC<RoadmapScreenProps> = ({
                       </View>
                     </View>
 
-                    {/* Active Phase Mastery Gate CTA */}
+                    {/* Latest Attempt Info for This Phase */}
+                    {latestAttempt && (
+                      <View style={styles.attemptNote}>
+                        <Text style={styles.attemptNoteText}>
+                          Last Attempt: {latestAttempt.score}/30 (
+                          {Math.round((latestAttempt.score / 30) * 100)}%) •{' '}
+                          {new Date(latestAttempt.timestamp).toLocaleDateString('en-IN')}
+                        </Text>
+                      </View>
+                    )}
+
+                    {/* Phase Action State: Current vs Completed vs Locked */}
                     {isCurrent && onNavigateToSkillCheck && (
                       <TouchableOpacity
                         style={styles.ctaBtn}
@@ -291,11 +361,29 @@ export const RoadmapScreen: React.FC<RoadmapScreenProps> = ({
                           style={styles.ctaGrad}
                         >
                           <Text style={styles.ctaText}>
-                            Verify Phase {stepNum} Mastery (90% Gate)
+                            Assess Phase {stepNum} (30 Qs • 90% Gate)
                           </Text>
                           <ArrowRight size={16} color="#ffffff" />
                         </LinearGradient>
                       </TouchableOpacity>
+                    )}
+
+                    {isCompleted && (
+                      <View style={styles.completedBar}>
+                        <CheckCircle2 size={15} color="#34d399" />
+                        <Text style={styles.completedBarText}>
+                          Phase {stepNum} Completed
+                        </Text>
+                      </View>
+                    )}
+
+                    {isLocked && (
+                      <View style={styles.lockedBar}>
+                        <Lock size={14} color="#64748b" />
+                        <Text style={styles.lockedBarText}>
+                          Locked — Pass Phase {stepNum - 1} (27/30) to unlock
+                        </Text>
+                      </View>
                     )}
                   </View>
                 )}
@@ -322,6 +410,18 @@ const styles = StyleSheet.create({
   scrollContent: { padding: 16, paddingBottom: 50 },
   row: { flexDirection: 'row', alignItems: 'center' },
   rowBetween: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  allDoneBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(52, 211, 153, 0.14)',
+    borderWidth: 1,
+    borderColor: 'rgba(52, 211, 153, 0.45)',
+    borderRadius: 16,
+    padding: 14,
+    marginBottom: 14,
+  },
+  allDoneTitle: { color: '#34d399', fontSize: 14, fontWeight: '800' },
+  allDoneSub: { color: '#a7f3d0', fontSize: 11, marginTop: 2 },
   heroCard: {
     borderRadius: 20,
     overflow: 'hidden',
@@ -411,6 +511,9 @@ const styles = StyleSheet.create({
   },
   phaseCardCompleted: {
     borderColor: 'rgba(52, 211, 153, 0.45)',
+  },
+  phaseCardLocked: {
+    opacity: 0.78,
   },
   stepCircle: {
     width: 28,
@@ -508,6 +611,14 @@ const styles = StyleSheet.create({
   },
   deliverableLabel: { color: '#c084fc', fontSize: 9, fontWeight: '800', letterSpacing: 0.7 },
   deliverableText: { color: '#e2e8f0', fontSize: 12, marginTop: 2, lineHeight: 17 },
+  attemptNote: {
+    marginTop: 10,
+    backgroundColor: 'rgba(56, 189, 248, 0.08)',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  attemptNoteText: { color: '#7dd3fc', fontSize: 11, fontWeight: '600' },
   ctaBtn: { borderRadius: 12, overflow: 'hidden', marginTop: 12 },
   ctaGrad: {
     flexDirection: 'row',
@@ -517,6 +628,32 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   ctaText: { color: '#ffffff', fontSize: 13, fontWeight: '800' },
+  completedBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+    marginTop: 12,
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: 'rgba(52, 211, 153, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(52, 211, 153, 0.35)',
+  },
+  completedBarText: { color: '#34d399', fontSize: 12, fontWeight: '800' },
+  lockedBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+    marginTop: 12,
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  lockedBarText: { color: '#64748b', fontSize: 11, fontWeight: '700' },
   emptyBox: { alignItems: 'center', paddingVertical: 40, paddingHorizontal: 16 },
   emptyTitle: { color: '#ffffff', fontSize: 16, fontWeight: '700' },
   emptySub: { color: '#94a3b8', fontSize: 12, textAlign: 'center', marginTop: 6, lineHeight: 18 },
