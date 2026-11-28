@@ -33,6 +33,7 @@ import {
   Star,
   ShieldCheck,
   ChevronRight,
+  LogOut,
 } from 'lucide-react-native';
 
 import { BottomNav } from '../components/common/BottomNav';
@@ -48,6 +49,7 @@ import {
 } from '../services/careerEngine';
 import { calculateOpportunityMatches } from '../services/opportunityMatcher';
 import { TOP_100_CAREERS } from '../constants/careerTaxonomy';
+import { ProfileScreen } from './student/ProfileScreen';
 
 // Dedicated Module Screens
 import { RoadmapScreen } from './student/RoadmapScreen';
@@ -62,6 +64,9 @@ import { FutureAlertsScreen } from './student/FutureAlertsScreen';
 // Clash of Clans Animated Corner Companion
 import { PantherDialoguePopup } from '../components/panther/PantherDialoguePopup';
 
+import { CareerExplorerScreen } from './student/CareerExplorerScreen';
+import { apiRequest } from '../config/api';
+
 const PROFILE_STORAGE_KEY = '@futurex_student_profile_v2';
 
 interface DiscoveredSkill {
@@ -72,9 +77,17 @@ interface DiscoveredSkill {
   rating: number; // 1 to 5
 }
 
-export const StudentDashboard: React.FC = () => {
+interface StudentDashboardProps {
+  authUser?: { id: string; name: string; email: string };
+  onLogout?: () => void;
+}
+
+export const StudentDashboard: React.FC<StudentDashboardProps> = ({
+  authUser,
+  onLogout,
+}) => {
   const insets = useSafeAreaInsets();
-  const [activeTab, setActiveTab] = useState<'home' | 'proof'>('home');
+  const [activeTab, setActiveTab] = useState<'home' | 'profile'>('home');
   const [currentModuleScreen, setCurrentModuleScreen] = useState<string | null>(null);
   const [isSynthesizing, setIsSynthesizing] = useState(false);
 
@@ -138,8 +151,45 @@ export const StudentDashboard: React.FC = () => {
   const loadSavedProfile = async () => {
     try {
       const stored = await AsyncStorage.getItem(PROFILE_STORAGE_KEY);
+      let baseProfile = stored ? JSON.parse(stored) : profile;
+
+      // Hydrate real saved 0-5 career assessment from SQLite if logged in
+      const meData = await apiRequest<any>('/api/assessments/me').catch(() => null);
+      if (meData && meData.success && meData.hasSelectedCareer && meData.profile) {
+        const hydrated: StudentProfile = {
+          ...baseProfile,
+          id: authUser?.id || baseProfile.id,
+          name: authUser?.name || baseProfile.name,
+          targetRole: {
+            ...baseProfile.targetRole,
+            roleId: meData.profile.targetRoleId,
+            roleTitle: meData.profile.targetRoleTitle,
+            profession: meData.profile.profession || baseProfile.targetRole.profession,
+            domainId: meData.profile.domainId || baseProfile.targetRole.domainId,
+            seniority: meData.profile.seniority || baseProfile.targetRole.seniority,
+          },
+          readinessPercentage: meData.profile.readinessPercentage ?? 0,
+          skills: (meData.skills || []).map((s: any) => ({
+            id: s.id,
+            name: s.name,
+            category: s.category,
+            proficiency: s.proficiencyPercentage,
+            targetBenchmark: s.targetBenchmarkPercentage,
+            status: s.verificationStatus === 'verified' ? 'Verified' : 'Self Reported',
+            isGap: s.isGap,
+          })),
+        };
+        setProfile(hydrated);
+        await AsyncStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(hydrated));
+        return;
+      }
+
       if (stored) {
-        setProfile(JSON.parse(stored));
+        setProfile({
+          ...baseProfile,
+          id: authUser?.id || baseProfile.id,
+          name: authUser?.name || baseProfile.name,
+        });
       }
     } catch {
       // Fallback to active state
@@ -376,7 +426,13 @@ export const StudentDashboard: React.FC = () => {
     return <ProjectsScreen profile={profile} onBack={() => setCurrentModuleScreen(null)} />;
   }
   if (currentModuleScreen === 'Opportunities') {
-    return <OpportunitiesScreen profile={profile} onBack={() => setCurrentModuleScreen(null)} />;
+    return (
+      <OpportunitiesScreen
+        profile={profile}
+        onBack={() => setCurrentModuleScreen(null)}
+        onNavigateToRoadmap={() => setCurrentModuleScreen('Roadmap')}
+      />
+    );
   }
   if (currentModuleScreen === 'Progress') {
     return <ProgressScreen profile={profile} onBack={() => setCurrentModuleScreen(null)} />;
@@ -411,6 +467,56 @@ export const StudentDashboard: React.FC = () => {
         onBack={() => setCurrentModuleScreen(null)}
         onNavigateToOpportunities={() => setCurrentModuleScreen('Opportunities')}
         onNavigateToRoadmap={() => setCurrentModuleScreen('Roadmap')}
+      />
+    );
+  }
+  if (currentModuleScreen === 'Profile') {
+    return (
+      <ProfileScreen
+        profile={profile}
+        userEmail={authUser?.email}
+        onBack={() => {
+          setCurrentModuleScreen(null);
+          setActiveTab('home');
+        }}
+        onOpenProofPass={() => setCurrentModuleScreen('Proof Pass')}
+        onOpenAimSelector={() => setCurrentModuleScreen('Career Explorer')}
+        onLogout={onLogout}
+      />
+    );
+  }
+  if (currentModuleScreen === 'Career Explorer') {
+    return (
+      <CareerExplorerScreen
+        currentProfile={profile}
+        onBack={() => {
+          setCurrentModuleScreen(null);
+          setActiveTab('home');
+        }}
+        onAssessmentComplete={async ({ updatedProfile, summary }) => {
+          setProfile(updatedProfile);
+          await AsyncStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(updatedProfile));
+          setCurrentModuleScreen(null);
+          setActiveTab('home');
+          setPantherPopup({
+            visible: true,
+            mode: 'scout',
+            message: `${updatedProfile.targetRole.roleTitle} locked! Baseline: ${summary.baselineReadiness}% (${summary.missingCount + summary.weakCount} skill gaps mapped).`,
+          });
+
+          // Background opportunity radar sync
+          discoverLiveOpportunities(
+            updatedProfile.targetRole.roleTitle,
+            updatedProfile.skills
+          ).then(async (result: any) => {
+            const liveOpps = result?.opportunities || [];
+            if (liveOpps.length > 0) {
+              const withOpps = { ...updatedProfile, opportunities: liveOpps };
+              setProfile(withOpps);
+              await AsyncStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(withOpps));
+            }
+          });
+        }}
       />
     );
   }
@@ -449,7 +555,7 @@ export const StudentDashboard: React.FC = () => {
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
+      <StatusBar barStyle="light-content" />
 
       {/* Ambient Orbs */}
       <View style={styles.ambientTopLeft} />
@@ -480,6 +586,11 @@ export const StudentDashboard: React.FC = () => {
             >
               <Bell size={18} color="#cbd5e1" />
             </TouchableOpacity>
+            {onLogout && (
+              <TouchableOpacity style={styles.iconCircle} onPress={onLogout}>
+                <LogOut size={16} color="#f43f5e" />
+              </TouchableOpacity>
+            )}
           </View>
         </View>
 
@@ -502,10 +613,7 @@ export const StudentDashboard: React.FC = () => {
                   <TouchableOpacity
                     style={styles.changeAimBtn}
                     disabled={isSynthesizing || isInspectingSkills}
-                    onPress={() => {
-                      setTempAim(profile.targetRole.roleTitle);
-                      setQuickAimModal(true);
-                    }}
+                    onPress={() => setCurrentModuleScreen('Career Explorer')}
                   >
                     {isSynthesizing || isInspectingSkills ? (
                       <ActivityIndicator size="small" color="#c084fc" />
@@ -899,8 +1007,10 @@ export const StudentDashboard: React.FC = () => {
         currentTab={activeTab}
         onSelectTab={(tab) => {
           setActiveTab(tab);
-          if (tab === 'proof') {
-            setCurrentModuleScreen('Proof Pass');
+          if (tab === 'profile') {
+            setCurrentModuleScreen('Profile');
+          } else {
+            setCurrentModuleScreen(null);
           }
         }}
         accentColor="#c084fc"

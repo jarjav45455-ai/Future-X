@@ -9,21 +9,25 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// ==========================================
-// 0. LOCAL DETERMINISTIC MASTER STORES
-// ==========================================
-let careerBankData = { roles: [] };
-try {
-  const bankPath = path.join(__dirname, 'careerBank.json');
-  if (fs.existsSync(bankPath)) {
-    careerBankData = JSON.parse(fs.readFileSync(bankPath, 'utf8'));
-    console.log(`[FutureX DB] Loaded ${careerBankData.roles.length} benchmark careers from careerBank.json`);
-  }
-} catch (e) {
-  console.warn('[FutureX DB] careerBank.json read error, using dynamic AI mode:', e.message);
-}
+const { db, initDatabase, getDbStats } = require('./db/database');
+const { apiRateLimiter, optionalAuth } = require('./middleware/auth');
+const authRoutes = require('./routes/authRoutes');
+const careerExplorerRoutes = require('./routes/careerExplorerRoutes');
+const { generateAdaptiveRoadmap } = require('./services/roadmapEngine');
+const opportunityRoutes = require('./routes/opportunityRoutes');
+const { startOpportunityScheduler } = require('./services/opportunitySources');
 
-// Load Local Role Exam Master Bank (Zero-API Assessment Store)
+initDatabase();
+app.use('/api', apiRateLimiter);
+app.use('/api', optionalAuth);
+app.use('/api/auth', authRoutes);
+app.use('/api', careerExplorerRoutes);
+app.use('/api/opportunities', opportunityRoutes);
+startOpportunityScheduler(db);
+
+// ==========================================
+// 0. LOCAL DETERMINISTIC EXAM & OPPORTUNITY STORES
+// ==========================================
 let roleExamBank = {};
 try {
   const examPath = path.join(__dirname, 'roleExamBank.json');
@@ -35,7 +39,6 @@ try {
   console.warn('[FutureX Exam DB] Warning reading roleExamBank.json:', err.message);
 }
 
-// Load Master Opportunity Bank (Zero-API Dynamic Portals)
 let opportunitiesMasterBank = { portals: [] };
 try {
   const oppPath = path.join(__dirname, 'opportunitiesBank.json');
@@ -47,31 +50,13 @@ try {
   console.warn('[FutureX Opportunities DB] File read warning:', e.message);
 }
 
-// Self-Growing Pipeline: Persist newly synthesized careers to disk
-function persistCareerToBank(newCareer) {
-  try {
-    const bankPath = path.join(__dirname, 'careerBank.json');
-    const exists = careerBankData.roles.some((r) => r.id === newCareer.id);
-    if (!exists) {
-      careerBankData.roles.push(newCareer);
-      fs.writeFileSync(bankPath, JSON.stringify(careerBankData, null, 2), 'utf8');
-      console.log(`[Self-Growing DB] Ingested & saved new career to disk: "${newCareer.title}" (Total Roles: ${careerBankData.roles.length})`);
-    }
-  } catch (err) {
-    console.error('[Self-Growing DB Write Error]:', err.message);
-  }
-}
-
-// In-Memory Caches & Sessions
+// Active Assessment Sessions
 const assessmentSessions = new Map();
-const projectCache = new Map();
-const skillsCache = new Map();
-const roadmapCache = new Map();
 
-// Multi-Key Google GenAI Setup
+// Multi-Key Google GenAI Setup (ONLY used by AI Mentor)
 const apiKeys = [
   process.env.GEMINI_API_KEY,
-  process.env.GEMINI_API_KEY_BACKUP || process.env.GEMINI_API_KEY
+  process.env.GEMINI_API_KEY_BACKUP || process.env.GEMINI_API_KEY,
 ].filter(Boolean);
 
 let currentKeyIndex = 0;
@@ -94,11 +79,14 @@ async function generateWithRetry(modelParams, maxRetries = 2) {
       const aiInstance = getAIInstance();
       return await aiInstance.models.generateContent({
         ...modelParams,
-        model: 'gemini-3.6-flash',
+        model: process.env.GEMINI_MODEL || 'gemini-3.6-flash',
       });
     } catch (err) {
       lastError = err;
-      const isQuota = err?.message?.includes('429') || err?.status === 429 || err?.message?.includes('RESOURCE_EXHAUSTED');
+      const isQuota =
+        err?.message?.includes('429') ||
+        err?.status === 429 ||
+        err?.message?.includes('RESOURCE_EXHAUSTED');
       if (isQuota) {
         console.warn(`[Rate Guard] Quota reached. Rotating key (Attempt ${attempt + 1})...`);
         currentKeyIndex++;
@@ -116,7 +104,15 @@ async function generateWithRetry(modelParams, maxRetries = 2) {
       const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
       const completion = await openai.chat.completions.create({
         model: 'gpt-4o-mini',
-        messages: [{ role: 'user', content: typeof modelParams.contents === 'string' ? modelParams.contents : JSON.stringify(modelParams.contents) }],
+        messages: [
+          {
+            role: 'user',
+            content:
+              typeof modelParams.contents === 'string'
+                ? modelParams.contents
+                : JSON.stringify(modelParams.contents),
+          },
+        ],
         temperature: 0.2,
       });
       return { text: completion.choices[0]?.message?.content || '' };
@@ -130,11 +126,15 @@ async function generateWithRetry(modelParams, maxRetries = 2) {
 
 // Health Check
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'active', platform: 'FutureX Hybrid Intelligence Layer' });
+  res.json({
+    status: 'active',
+    platform: 'FutureX Hybrid Intelligence Layer',
+    database: getDbStats(),
+  });
 });
 
 // ==========================================
-// 1. CONVERSATIONAL CAREER MENTOR (PURE AI)
+// 1. CONVERSATIONAL CAREER MENTOR (AI ONLY HERE)
 // ==========================================
 app.post('/api/mentor/ask', async (req, res) => {
   try {
@@ -143,7 +143,9 @@ app.post('/api/mentor/ask', async (req, res) => {
 
     const roleTitle = studentProfile?.targetRole?.roleTitle || 'Professional';
     const currentPhase = studentProfile?.roadmap?.find((m) => m.status === 'current');
-    const roadmapSummary = currentPhase ? `${currentPhase.title} (${currentPhase.subtitle})` : 'Foundations';
+    const roadmapSummary = currentPhase
+      ? `${currentPhase.title} (${currentPhase.subtitle})`
+      : 'Foundations';
 
     const systemInstruction = `You are FutureX Senior Career Intelligence Mentor.
 Mentoring Profile: Role: "${roleTitle}", Current Phase: "${roadmapSummary}", Readiness: ${studentProfile?.readinessPercentage || 0}%.
@@ -152,7 +154,10 @@ Deliver concise, highly actionable guidance under 120 words. No boilerplate.`;
     const contents = [];
     if (Array.isArray(history)) {
       for (const turn of history.slice(-6)) {
-        contents.push({ role: turn.sender === 'student' ? 'user' : 'model', parts: [{ text: turn.text }] });
+        contents.push({
+          role: turn.sender === 'student' ? 'user' : 'model',
+          parts: [{ text: turn.text }],
+        });
       }
     }
     contents.push({ role: 'user', parts: [{ text: question }] });
@@ -162,7 +167,10 @@ Deliver concise, highly actionable guidance under 120 words. No boilerplate.`;
       config: { systemInstruction, temperature: 0.25 },
     });
 
-    return res.json({ success: true, answer: response.text?.trim() || 'Guidance temporarily unavailable.' });
+    return res.json({
+      success: true,
+      answer: response.text?.trim() || 'Guidance temporarily unavailable.',
+    });
   } catch (error) {
     console.error('[Mentor Error]:', error?.message);
     res.status(500).json({ error: 'Career mentor is currently offline.' });
@@ -170,251 +178,232 @@ Deliver concise, highly actionable guidance under 120 words. No boilerplate.`;
 });
 
 // ==========================================
-// 2. DYNAMIC SKILL INSPECTION & ROADMAP
+// 2. ZERO-AI DETERMINISTIC CAREER & SKILL ENGINE (101-CAREER SQLITE DB)
 // ==========================================
-app.post('/api/careers/inspect-skills', async (req, res) => {
-  const { roleQuery } = req.body;
+function findOccupationInDb(roleQuery) {
+  const clean = String(roleQuery || '').trim().toLowerCase();
+  if (!clean) return null;
+  const slug = clean.replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+
+  // 1. Exact id or exact title match
+  let occ = db
+    .prepare('SELECT * FROM occupations WHERE id = ? OR LOWER(title) = ? LIMIT 1')
+    .get(slug, clean);
+  if (occ) return occ;
+
+  // 2. Substring match on title or category
+  occ = db
+    .prepare(
+      'SELECT * FROM occupations WHERE LOWER(title) LIKE ? OR LOWER(category) LIKE ? ORDER BY is_custom ASC LIMIT 1'
+    )
+    .get(`%${clean}%`, `%${clean}%`);
+  if (occ) return occ;
+
+  // 3. Keyword token match (e.g. "ml", "cyber", "pilot")
+  const tokens = clean.split(/\s+/).filter((t) => t.length >= 2);
+  for (const token of tokens) {
+    occ = db
+      .prepare(
+        'SELECT * FROM occupations WHERE LOWER(title) LIKE ? OR LOWER(description) LIKE ? ORDER BY is_custom ASC LIMIT 1'
+      )
+      .get(`%${token}%`, `%${token}%`);
+    if (occ) return occ;
+  }
+
+  return null;
+}
+
+function getDeepSkillsForOccupation(occupationId) {
+  const rows = db
+    .prepare(`
+      SELECT
+        s.id, s.name, s.category, s.description, s.why_it_matters,
+        s.required_proficiency, s.difficulty_level, os.is_required
+      FROM occupation_skills os
+      JOIN skills s ON s.id = os.skill_id
+      WHERE os.occupation_id = ?
+      ORDER BY os.is_required DESC, os.weight DESC, s.category ASC
+    `)
+    .all(occupationId);
+
+  const prereqStmt = db.prepare(`
+    SELECT s.name FROM skill_prerequisites sp
+    JOIN skills s ON s.id = sp.prerequisite_skill_id
+    WHERE sp.skill_id = ?
+  `);
+
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    category: r.category,
+    description: r.description || '',
+    whyItMatters: r.why_it_matters || '',
+    requiredProficiency: Number(r.required_proficiency || 4),
+    difficultyLevel: r.difficulty_level || 'Intermediate',
+    isRequired: Boolean(r.is_required),
+    prerequisites: prereqStmt.all(r.id).map((p) => p.name),
+  }));
+}
+
+function buildDeterministicRoadmap(occ, skills, skillRatings = []) {
+  const ratingMap = new Map(
+    (Array.isArray(skillRatings) ? skillRatings : []).map((r) => [
+      String(r.name || '').toLowerCase(),
+      Number(r.rating || 1),
+    ])
+  );
+
+  // Filter out skills student already self-rated >= 4 so roadmap focuses on actual gaps
+  const needsFocus = (list) => {
+    const filtered = list.filter((s) => {
+      const rating = ratingMap.get(s.name.toLowerCase());
+      return rating === undefined || rating < 4;
+    });
+    return (filtered.length > 0 ? filtered : list).map((s) => s.name);
+  };
+
+  const beginner = needsFocus(skills.filter((s) => s.difficultyLevel === 'Beginner'));
+  const intermediate = needsFocus(skills.filter((s) => s.difficultyLevel === 'Intermediate'));
+  const advanced = needsFocus(skills.filter((s) => s.difficultyLevel === 'Advanced'));
+
+  return [
+    {
+      stepNumber: 1,
+      title: `Phase 1: ${occ.title} Core Foundations`,
+      subtitle: beginner.length
+        ? `Focus on: ${beginner.slice(0, 3).join(', ')}`
+        : 'Core domain principles & setup',
+      duration: '3-4 Weeks',
+      category: 'Foundations',
+      deliverable: `${occ.title} Foundation Portfolio Artifact`,
+      status: 'current',
+    },
+    {
+      stepNumber: 2,
+      title: `Phase 2: Applied Tools & Practical Execution`,
+      subtitle: intermediate.length
+        ? `Build with: ${intermediate.slice(0, 3).join(', ')}`
+        : 'Real-world domain workflows',
+      duration: '4-6 Weeks',
+      category: 'Execution',
+      deliverable: `Verified ${occ.title} Case Study / Project`,
+      status: 'upcoming',
+    },
+    {
+      stepNumber: 3,
+      title: `Phase 3: Production Mastery & Specialization`,
+      subtitle: advanced.length
+        ? `Specialize in: ${advanced.slice(0, 3).join(', ')}`
+        : 'Industry-grade capstone delivery',
+      duration: '5-6 Weeks',
+      category: 'Specialization',
+      deliverable: `End-to-End ${occ.title} Capstone & ProofPass`,
+      status: 'upcoming',
+    },
+  ];
+}
+
+app.post('/api/careers/inspect-skills', (req, res) => {
+  const { roleQuery } = req.body || {};
   if (!roleQuery) return res.status(400).json({ error: 'roleQuery required' });
 
-  const queryNorm = roleQuery.toLowerCase().trim();
-
-  // 1. Check local careerBank.json (Deterministic Fast Path)
-  const matchedRole = careerBankData.roles.find(
-    (r) => r.id === queryNorm.replace(/\s+/g, '-') || r.title.toLowerCase().includes(queryNorm)
-  );
-
-  if (matchedRole && matchedRole.skills) {
-    return res.json({ success: true, source: 'deterministic-db', skills: matchedRole.skills });
+  const matched = findOccupationInDb(roleQuery);
+  if (!matched) {
+    const suggestions = db
+      .prepare('SELECT id, title, category FROM occupations ORDER BY title ASC LIMIT 8')
+      .all();
+    return res.status(404).json({
+      success: false,
+      error: `Career "${roleQuery}" not found in verified database.`,
+      suggestions,
+    });
   }
 
-  // 2. In-Memory Cache
-  if (skillsCache.has(queryNorm)) {
-    return res.json({ success: true, source: 'cache', skills: skillsCache.get(queryNorm) });
-  }
-
-  // 3. AI Synthesizer (Only for unknown/rare roles)
-  try {
-    console.log(`[AI Engine] Long-tail skill extraction for: "${roleQuery}"`);
-    const prompt = `Extract 8 to 12 essential competencies for "${roleQuery}". Return ONLY a strict JSON array:
-[{"id": "sk-1", "name": "Skill Name", "category": "Core Knowledge / Tools / Technical", "description": "Brief 1-line reason"}]`;
-
-    const response = await generateWithRetry({ contents: prompt, config: { temperature: 0.2 } });
-    let raw = (response.text || '').trim().replace(/^```json/i, '').replace(/^```/, '').replace(/```$/, '').trim();
-    const skills = JSON.parse(raw);
-    skillsCache.set(queryNorm, skills);
-    return res.json({ success: true, source: 'ai-synthesis', skills });
-  } catch (error) {
-    const fallback = [
-      { id: 'sk-1', name: `${roleQuery} Core Fundamentals`, category: 'Core Knowledge' },
-      { id: 'sk-2', name: 'Standard Industry Toolchain', category: 'Tools' },
-      { id: 'sk-3', name: 'Operational Execution', category: 'Technical' }
-    ];
-    return res.json({ success: true, source: 'fallback', skills: fallback });
-  }
+  const skills = getDeepSkillsForOccupation(matched.id);
+  return res.json({
+    success: true,
+    source: 'sqlite-verified-101-db',
+    occupation: {
+      id: matched.id,
+      title: matched.title,
+      category: matched.category,
+      domain: matched.domain,
+      seniority: matched.seniority,
+    },
+    skills,
+  });
 });
 
-app.post('/api/careers/synthesize', async (req, res) => {
-  const { roleQuery } = req.body;
+app.post('/api/careers/synthesize', (req, res) => {
+  const { roleQuery } = req.body || {};
   if (!roleQuery) return res.status(400).json({ error: 'roleQuery is required' });
 
-  const queryNorm = roleQuery.toLowerCase().trim();
-
-  // 1. Deterministic Fast Path: Check existing roles in memory
-  const matched = careerBankData.roles.find(
-    (r) => r.id === queryNorm.replace(/\s+/g, '-') || r.title.toLowerCase().includes(queryNorm)
-  );
-
-  if (matched) {
-    return res.json({
-      success: true,
-      source: 'deterministic-db',
-      career: {
-        roleId: matched.id,
-        roleTitle: matched.title,
-        profession: matched.domain,
-        domainId: (matched.domain || 'general').toLowerCase(),
-        seniority: matched.seniority || 'Junior to Mid-Level',
-        skills: matched.skills,
-        roadmap: matched.roadmap,
-      },
+  const matched = findOccupationInDb(roleQuery);
+  if (!matched) {
+    return res.status(404).json({
+      success: false,
+      error: `Career "${roleQuery}" not found in verified 101-career database. Please pick a career from Career Explorer.`,
     });
   }
 
-  // 2. Layer 4: AI Synthesis for Unknown Long-Tail Career
-  try {
-    console.log(`[Self-Growing Pipeline] Synthesizing unknown role via AI: "${roleQuery}"`);
-    
-    const prompt = `You are a workforce intelligence architect. Generate a complete structured career profile for the role: "${roleQuery}".
-Return ONLY a valid JSON object matching this exact schema:
-{
-  "id": "${queryNorm.replace(/[^a-z0-9]/g, '-')}",
-  "title": "${roleQuery}",
-  "domain": "Target Industry Domain",
-  "seniority": "Junior to Mid-Level",
-  "skills": [
-    {"id": "sk-1", "name": "Exact Skill 1", "category": "Core Knowledge"},
-    {"id": "sk-2", "name": "Exact Skill 2", "category": "Tools"},
-    {"id": "sk-3", "name": "Exact Skill 3", "category": "Technical"},
-    {"id": "sk-4", "name": "Exact Skill 4", "category": "Execution"},
-    {"id": "sk-5", "name": "Exact Skill 5", "category": "Core Knowledge"},
-    {"id": "sk-6", "name": "Exact Skill 6", "category": "Tools"}
-  ],
-  "roadmap": [
-    {
-      "stepNumber": 1,
-      "title": "Phase 1: Foundational Systems",
-      "subtitle": "Core theoretical frameworks and setup",
-      "duration": "4 Weeks",
-      "category": "Foundations",
-      "deliverable": "Baseline Architectural Spec",
-      "status": "current"
-    },
-    {
-      "stepNumber": 2,
-      "title": "Phase 2: Applied Workflows",
-      "subtitle": "Practical domain implementations",
-      "duration": "5 Weeks",
-      "category": "Execution",
-      "deliverable": "Verified Production Case Deliverable",
-      "status": "upcoming"
-    },
-    {
-      "stepNumber": 3,
-      "title": "Phase 3: Production & Specialization",
-      "subtitle": "Advanced integration, telemetry, and edge-cases",
-      "duration": "6 Weeks",
-      "category": "Specialization",
-      "deliverable": "End-to-End Capstone Project",
-      "status": "upcoming"
-    }
-  ]
-}`;
-
-    const response = await generateWithRetry({
-      contents: prompt,
-      config: { temperature: 0.2 },
-    });
-
-    let raw = (response.text || '')
-      .trim()
-      .replace(/^```json/i, '')
-      .replace(/^```/, '')
-      .replace(/```$/, '')
-      .trim();
-
-    const synthesizedRole = JSON.parse(raw);
-
-    // Persist to disk
-    persistCareerToBank(synthesizedRole);
-
-    return res.json({
-      success: true,
-      source: 'ai-synthesized-and-persisted',
-      career: {
-        roleId: synthesizedRole.id,
-        roleTitle: synthesizedRole.title,
-        profession: synthesizedRole.domain,
-        domainId: (synthesizedRole.domain || 'general').toLowerCase(),
-        seniority: synthesizedRole.seniority,
-        skills: synthesizedRole.skills,
-        roadmap: synthesizedRole.roadmap,
-      },
-    });
-  } catch (error) {
-    console.error('[Synthesize Fallback Triggered]:', error.message);
-    
-    const fallbackRole = {
-      id: queryNorm.replace(/[^a-z0-9]/g, '-'),
-      title: roleQuery,
-      domain: 'Specialized Practice',
-      seniority: 'Junior to Mid-Level',
-      skills: [
-        { id: 'sk-1', name: `${roleQuery} Core Fundamentals`, category: 'Core Knowledge' },
-        { id: 'sk-2', name: 'Operational Field Toolchain', category: 'Tools' },
-        { id: 'sk-3', name: 'Execution & QA Standards', category: 'Technical' }
-      ],
-      roadmap: [
-        { stepNumber: 1, title: 'Phase 1: Foundations', subtitle: 'Core baseline principles', deliverable: 'Baseline Artifact', duration: '4 Weeks', status: 'current' },
-        { stepNumber: 2, title: 'Phase 2: Applied Operations', subtitle: 'Simulated industry workflows', deliverable: 'Verified Deliverable', duration: '5 Weeks', status: 'upcoming' }
-      ]
-    };
-
-    persistCareerToBank(fallbackRole);
-
-    return res.json({
-      success: true,
-      source: 'deterministic-fallback',
-      career: {
-        roleId: fallbackRole.id,
-        roleTitle: fallbackRole.title,
-        profession: fallbackRole.domain,
-        domainId: 'domain-general',
-        seniority: fallbackRole.seniority,
-        skills: fallbackRole.skills,
-        roadmap: fallbackRole.roadmap,
-      }
-    });
-  }
-});
-
-// Tailored Roadmap Endpoint
-app.post('/api/careers/generate-tailored-roadmap', (req, res) => {
-  const { roleQuery } = req.body || {};
-  const query = roleQuery || 'Professional Track';
-
-  const queryNorm = query.toLowerCase().trim();
-  const matched = careerBankData.roles.find(
-    (r) => r.id === queryNorm.replace(/\s+/g, '-') || r.title.toLowerCase().includes(queryNorm)
-  );
-
-  if (matched && matched.roadmap) {
-    return res.json({
-      success: true,
-      roleTitle: matched.title,
-      profession: matched.domain,
-      seniority: matched.seniority || 'Junior to Mid-Level',
-      marketDemand: 'High',
-      roadmap: matched.roadmap,
-    });
-  }
+  const skills = getDeepSkillsForOccupation(matched.id);
+  const roadmap = buildDeterministicRoadmap(matched, skills);
 
   return res.json({
     success: true,
-    roleTitle: query,
-    profession: 'Industry Practice',
-    seniority: 'Junior to Mid-Level',
-    marketDemand: 'High',
-    roadmap: [
-      {
-        stepNumber: 1,
-        title: `Phase 1: ${query} Baseline Systems`,
-        subtitle: 'Core operational standards, protocols, and architectural foundations',
-        duration: '4 Weeks',
-        category: 'Foundations',
-        deliverable: `${query} Verified Architecture Portfolio`,
-        status: 'current',
-      },
-      {
-        stepNumber: 2,
-        title: `Phase 2: Production Execution & Rigor`,
-        subtitle: 'Hands-on workflow delivery and real-world system benchmarks',
-        duration: '5 Weeks',
-        category: 'Execution',
-        deliverable: 'Production Case Artifact & Technical ProofPass',
-        status: 'upcoming',
-      },
-      {
-        stepNumber: 3,
-        title: `Phase 3: High-Scale Reliability & Specialization`,
-        subtitle: 'Edge-case handling, distributed optimization, and domain mastery',
-        duration: '6 Weeks',
-        category: 'Specialization',
-        deliverable: 'Industry Capstone Deliverable',
-        status: 'upcoming',
-      },
-    ],
+    source: 'sqlite-verified-101-db',
+    career: {
+      roleId: matched.id,
+      roleTitle: matched.title,
+      profession: matched.category,
+      domainId: matched.domain || 'engineering_tech',
+      seniority: matched.seniority || 'Entry / Junior',
+      coreCompetencies: skills.slice(0, 5).map((s) => s.name),
+      toolsAndFrameworks: skills
+        .filter((s) => s.category.toLowerCase().includes('tool'))
+        .map((s) => s.name),
+      skills,
+      roadmap,
+    },
   });
 });
+
+app.post('/api/careers/generate-tailored-roadmap', (req, res) => {
+  const { roleQuery, skillRatings } = req.body || {};
+  const query = roleQuery || 'AI Engineer';
+
+  const matched = findOccupationInDb(query);
+  if (!matched) {
+    return res.status(404).json({
+      success: false,
+      error: `Career "${query}" not found in verified 101-career database.`,
+    });
+  }
+
+  const skills = getDeepSkillsForOccupation(matched.id);
+  const engineResult = generateAdaptiveRoadmap(
+    db,
+    matched,
+    skills,
+    skillRatings,
+    req.user?.id || null
+  );
+
+  return res.json({
+    success: true,
+    source: 'sqlite-dag-adaptive-engine',
+    roleTitle: matched.title,
+    profession: matched.category,
+    seniority: matched.seniority || 'Entry / Junior',
+    marketDemand: 'High',
+    totalPhases: engineResult.totalPhases,
+    totalSkillsCovered: engineResult.totalSkillsCovered,
+    fastTrackedSkills: engineResult.fastTrackedSkills,
+    roadmap: engineResult.roadmap,
+  });
+});
+  
+
 
 // ==========================================
 // 3. STAGE-GATED OPPORTUNITY ENGINE (DYNAMIC DEEP LINKS + ROADMAP SYNC)
@@ -426,72 +415,77 @@ function detectDomainFromRole(roleTitle = '') {
   if (r.includes('pilot') || r.includes('aviat') || r.includes('flight') || r.includes('aero')) return 'aviation';
   if (r.includes('financ') || r.includes('bank') || r.includes('account') || r.includes('invest') || r.includes('trade')) return 'finance';
   if (r.includes('design') || r.includes('ui') || r.includes('ux') || r.includes('product designer') || r.includes('animat')) return 'design';
-  return 'tech'; // Default tech & systems
+  return 'tech';
 }
 
 function generateTailoredOpportunities(roleTitle = 'Professional', userSkills = [], currentPhaseNum = 1) {
   const domain = detectDomainFromRole(roleTitle);
   const portals = opportunitiesMasterBank.portals || [];
 
-  const matchedPortals = portals.filter((p) =>
-    p.domains.includes(domain) || p.domains.includes('all') || p.domains.includes('general')
+  const matchedPortals = portals.filter(
+    (p) => p.domains.includes(domain) || p.domains.includes('all') || p.domains.includes('general')
   );
 
-  return matchedPortals.map((portal, index) => {
-    const cleanQuery = encodeURIComponent(roleTitle.trim());
-    let dynamicApplyUrl = portal.baseQueryUrl;
+  return matchedPortals
+    .map((portal, index) => {
+      const cleanQuery = encodeURIComponent(roleTitle.trim());
+      let dynamicApplyUrl = portal.baseQueryUrl;
 
-    if (portal.baseQueryUrl.endsWith('=') || portal.baseQueryUrl.endsWith('-')) {
-      dynamicApplyUrl = `${portal.baseQueryUrl}${cleanQuery}`;
-    }
+      if (portal.baseQueryUrl.endsWith('=') || portal.baseQueryUrl.endsWith('-')) {
+        dynamicApplyUrl = `${portal.baseQueryUrl}${cleanQuery}`;
+      }
 
-    // Determine Required Roadmap Phase for this specific opportunity
-    // Hackathons & Foundation fellowships = Phase 1; Internships = Phase 2; High-tier Jobs = Phase 3
-    let requiredPhase = 1;
-    let eligiblePhases = [1, 2, 3, 4];
+      let requiredPhase = 1;
+      let eligiblePhases = [1, 2, 3, 4];
 
-    if (portal.type === 'INTERNSHIP') {
-      requiredPhase = 2;
-      eligiblePhases = [2, 3, 4];
-    } else if (portal.type === 'JOB') {
-      requiredPhase = 3;
-      eligiblePhases = [3, 4];
-    } else if (portal.type === 'FELLOWSHIP') {
-      requiredPhase = index % 2 === 0 ? 1 : 2;
-      eligiblePhases = requiredPhase === 1 ? [1, 2, 3, 4] : [2, 3, 4];
-    }
+      if (portal.type === 'INTERNSHIP') {
+        requiredPhase = 2;
+        eligiblePhases = [2, 3, 4];
+      } else if (portal.type === 'JOB') {
+        requiredPhase = 3;
+        eligiblePhases = [3, 4];
+      } else if (portal.type === 'FELLOWSHIP') {
+        requiredPhase = index % 2 === 0 ? 1 : 2;
+        eligiblePhases = requiredPhase === 1 ? [1, 2, 3, 4] : [2, 3, 4];
+      }
 
-    const isPhaseEligible = currentPhaseNum >= requiredPhase;
+      const isPhaseEligible = currentPhaseNum >= requiredPhase;
+      const baseScore = 75 + ((index * 5) % 18);
+      const phaseAdjustedScore = isPhaseEligible
+        ? Math.min(98, baseScore + currentPhaseNum * 4)
+        : Math.max(45, baseScore - 20);
 
-    // Stage-Gated Dynamic Scoring
-    const baseScore = 75 + ((index * 5) % 18);
-    const phaseAdjustedScore = isPhaseEligible
-      ? Math.min(98, baseScore + (currentPhaseNum * 4))
-      : Math.max(45, baseScore - 20);
+      const missingGaps = !isPhaseEligible
+        ? [`Phase ${requiredPhase} Milestone Deliverable`, 'Production Telemetry']
+        : index === 0
+          ? []
+          : ['Advanced Edge-Cases'];
 
-    const missingGaps = !isPhaseEligible
-      ? [`Phase ${requiredPhase} Milestone Deliverable`, 'Production Telemetry']
-      : (index === 0 ? [] : ['Advanced Edge-Cases']);
-
-    return {
-      id: `live-opp-${portal.id}-${index}`,
-      title: `${roleTitle} ${portal.type === 'HACKATHON' ? 'Challenge Sprint' : portal.type === 'INTERNSHIP' ? 'Cohort Internship' : portal.type === 'FELLOWSHIP' ? 'Research Fellowship' : 'Early Career Role'}`,
-      organization: portal.name,
-      type: portal.type,
-      location: portal.domains.includes('tech') ? 'Remote / Hybrid' : 'Pan-India / Hybrid',
-      deadline: 'Active 2026',
-      applyUrl: dynamicApplyUrl,
-      authorityBadge: portal.authority,
-      matchScore: phaseAdjustedScore,
-      summary: portal.description,
-      requiredSkills: [roleTitle, 'Core Execution', 'Problem Solving'],
-      missingSkills: missingGaps,
-      requiredPhase,
-      eligiblePhases,
-      isDynamicDeepLink: true,
-      stipendOrPrize: portal.type === 'HACKATHON' ? '₹1,00,000+ Prize Pool' : portal.type === 'INTERNSHIP' ? '₹25,000 - ₹45,000 / mo' : 'Industry Standard'
-    };
-  }).sort((a, b) => b.matchScore - a.matchScore);
+      return {
+        id: `live-opp-${portal.id}-${index}`,
+        title: `${roleTitle} ${portal.type === 'HACKATHON' ? 'Challenge Sprint' : portal.type === 'INTERNSHIP' ? 'Cohort Internship' : portal.type === 'FELLOWSHIP' ? 'Research Fellowship' : 'Early Career Role'}`,
+        organization: portal.name,
+        type: portal.type,
+        location: portal.domains.includes('tech') ? 'Remote / Hybrid' : 'Pan-India / Hybrid',
+        deadline: 'Active 2026',
+        applyUrl: dynamicApplyUrl,
+        authorityBadge: portal.authority,
+        matchScore: phaseAdjustedScore,
+        summary: portal.description,
+        requiredSkills: [roleTitle, 'Core Execution', 'Problem Solving'],
+        missingSkills: missingGaps,
+        requiredPhase,
+        eligiblePhases,
+        isDynamicDeepLink: true,
+        stipendOrPrize:
+          portal.type === 'HACKATHON'
+            ? '₹1,00,000+ Prize Pool'
+            : portal.type === 'INTERNSHIP'
+              ? '₹25,000 - ₹45,000 / mo'
+              : 'Industry Standard',
+      };
+    })
+    .sort((a, b) => b.matchScore - a.matchScore);
 }
 
 app.post('/api/opportunities/radar', (req, res) => {
@@ -515,14 +509,18 @@ app.post('/api/opportunities/radar', (req, res) => {
         actionText: 'Register Now',
         priority: 'HIGH',
         applyUrl: 'https://www.sih.gov.in',
-      }
+      },
     ],
   });
 });
 
 app.post('/api/opportunities/discover', (req, res) => {
   const { roleTitle, userSkills, currentPhase } = req.body || {};
-  const tailored = generateTailoredOpportunities(roleTitle || 'Professional', userSkills, currentPhase?.stepNumber || 1);
+  const tailored = generateTailoredOpportunities(
+    roleTitle || 'Professional',
+    userSkills,
+    currentPhase?.stepNumber || 1
+  );
   return res.json({ success: true, opportunities: tailored });
 });
 
@@ -547,7 +545,11 @@ app.post('/api/projects/recommend', (req, res) => {
         estimatedHours: 15,
         skillsDeveloped: gaps.length ? gaps : ['Clean Architecture', 'Testing'],
         whyRecommended: `Reinforces Phase 1 foundational requirements for ${roleTitle}.`,
-        milestones: ['Scaffold repository & linter', 'Implement service boundaries', 'Add automated tests']
+        milestones: [
+          'Scaffold repository & linter',
+          'Implement service boundaries',
+          'Add automated tests',
+        ],
       },
       {
         id: 'proj-2',
@@ -559,9 +561,13 @@ app.post('/api/projects/recommend', (req, res) => {
         estimatedHours: 25,
         skillsDeveloped: ['Fault Tolerance', 'Asynchronous Queues'],
         whyRecommended: 'Eliminates active technical skill gaps through hands-on implementation.',
-        milestones: ['Design schemas & contracts', 'Build resilient pipelines with retry logic', 'Benchmark metrics']
-      }
-    ]
+        milestones: [
+          'Design schemas & contracts',
+          'Build resilient pipelines with retry logic',
+          'Benchmark metrics',
+        ],
+      },
+    ],
   });
 });
 
@@ -575,7 +581,6 @@ app.post('/api/skill-check/generate', (req, res) => {
   const phaseStep = currentPhase?.stepNumber || 1;
   const phaseKey = phaseStep >= 2 ? 'phase2' : 'phase1';
 
-  // 1. Detect Category Deterministically
   let matchedDomain = 'frontend';
   if (roleTitle.includes('front') || roleTitle.includes('ui') || roleTitle.includes('web') || roleTitle.includes('react')) {
     matchedDomain = 'frontend';
@@ -591,7 +596,6 @@ app.post('/api/skill-check/generate', (req, res) => {
     matchedDomain = 'finance';
   }
 
-  // 2. Extract Questions for Domain & Phase
   const domainData = roleExamBank[matchedDomain] || roleExamBank['frontend'] || {};
   let pool = domainData[phaseKey] || [];
 
@@ -599,7 +603,6 @@ app.post('/api/skill-check/generate', (req, res) => {
     pool = domainData['phase1'] || [];
   }
 
-  // Shuffle options so correct index is randomized
   const finalQuestions = pool.map((q, idx) => {
     const opts = [...q.options];
     const correctOpt = opts[q.correctIndex || 0];
@@ -621,7 +624,9 @@ app.post('/api/skill-check/generate', (req, res) => {
     phaseStep,
   });
 
-  console.log(`[Exam Generator] Dispensed ${finalQuestions.length} zero-API questions for ${targetRole?.roleTitle || 'Professional'} (${phaseKey})`);
+  console.log(
+    `[Exam Generator] Dispensed ${finalQuestions.length} zero-API questions for ${targetRole?.roleTitle || 'Professional'} (${phaseKey})`
+  );
 
   return res.json({
     success: true,
@@ -655,7 +660,8 @@ app.post('/api/skill-check/submit', (req, res) => {
   const skillStats = {};
 
   questions.forEach((q, idx) => {
-    const isCorrect = userAnswers?.[q.id] === q.correctIndex || userAnswers?.[idx] === q.correctIndex;
+    const isCorrect =
+      userAnswers?.[q.id] === q.correctIndex || userAnswers?.[idx] === q.correctIndex;
     if (isCorrect) correctCount++;
 
     const sk = q.skill || 'Core Knowledge';
@@ -679,7 +685,11 @@ app.post('/api/skill-check/submit', (req, res) => {
     if (currentIdx !== -1) {
       roadmap[currentIdx] = { ...roadmap[currentIdx], status: 'completed' };
       if (currentIdx + 1 < roadmap.length) {
-        roadmap[currentIdx + 1] = { ...roadmap[currentIdx + 1], status: 'current', assessmentUnlocked: true };
+        roadmap[currentIdx + 1] = {
+          ...roadmap[currentIdx + 1],
+          status: 'current',
+          assessmentUnlocked: true,
+        };
       }
     }
     updatedProfile = {

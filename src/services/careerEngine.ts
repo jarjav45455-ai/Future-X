@@ -6,29 +6,17 @@ import {
   ProofItem,
   OpportunityItem,
 } from '../types/student';
+import { API_BASE_URL, apiRequest } from '../config/api';
 
-// Verified Physical Device IP for Expo Go
-const BASE_URL = 'http://10.90.137.102:5000';
+const BASE_URL = API_BASE_URL;
 const BACKEND_SYNTHESIZE_URL = `${BASE_URL}/api/careers/synthesize`;
 
 // ==========================================
-// CENTRAL NETWORK CLIENT (No Auto-Cancellation)
+// CENTRAL NETWORK CLIENT
 // ==========================================
 export async function postData(endpoint: string, body: any) {
   try {
-    const response = await fetch(`${BASE_URL}${endpoint}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(body),
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP Error: ${response.status}`);
-    }
-
-    return await response.json();
+    return await apiRequest(endpoint, { method: 'POST', body });
   } catch (err: any) {
     console.warn(`[Network] ${endpoint} call error:`, err?.message);
     throw err;

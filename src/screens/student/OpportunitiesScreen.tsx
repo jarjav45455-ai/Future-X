@@ -1,52 +1,33 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
   ScrollView,
   TouchableOpacity,
   StyleSheet,
-  Linking,
   ActivityIndicator,
+  RefreshControl,
+  StatusBar,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { LinearGradient } from 'expo-linear-gradient';
 import {
-  ExternalLink,
-  CheckCircle,
-  Clock,
-  Sparkles,
-  DollarSign,
-  AlertTriangle,
-  Building,
-  MapPin,
   Lock,
-  ArrowRight,
-  ShieldCheck,
+  Sparkles,
+  MapPin,
+  ChevronRight,
+  RefreshCw,
+  AlertCircle,
+  CheckCircle2,
+  GraduationCap,
 } from 'lucide-react-native';
-
 import { FutureXHeader } from '../../components/common/FutureXHeader';
+import { apiRequest } from '../../config/api';
 import { StudentProfile } from '../../types/student';
-import { fetchLiveRadarOpportunities } from '../../services/careerEngine';
-import { PantherDialoguePopup } from '../../components/panther/PantherDialoguePopup';
-
-export interface DynamicOpportunity {
-  id: string;
-  title: string;
-  organization: string;
-  type?: string;
-  location: string;
-  deadline?: string;
-  applyUrl?: string;
-  applicationUrl?: string;
-  requiredSkills: string[];
-  missingSkills?: string[];
-  matchScore: number;
-  stipendOrPrize?: string;
-  summary?: string;
-  eligibility?: string;
-  requiredPhase?: number;
-  eligiblePhases?: number[];
-}
+import {
+  OpportunityDetailScreen,
+  OpportunityItem,
+} from './OpportunityDetailScreen';
 
 interface OpportunitiesScreenProps {
   profile: StudentProfile;
@@ -54,565 +35,419 @@ interface OpportunitiesScreenProps {
   onNavigateToRoadmap?: () => void;
 }
 
+type CategoryTab = 'INTERNSHIP' | 'JOB' | 'HACKATHON';
+
+const TABS: { key: CategoryTab; label: string }[] = [
+  { key: 'INTERNSHIP', label: 'Internships' },
+  { key: 'JOB', label: 'Jobs' },
+  { key: 'HACKATHON', label: 'Hackathons' },
+];
+
 export const OpportunitiesScreen: React.FC<OpportunitiesScreenProps> = ({
   profile,
   onBack,
   onNavigateToRoadmap,
 }) => {
-  const cacheKey = `@futurex_opps_${profile.id || 'usr'}_${profile.targetRole.roleId}`;
-  const [opportunities, setOpportunities] = useState<DynamicOpportunity[]>([]);
+  const [activeTab, setActiveTab] = useState<CategoryTab>('JOB');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [selectedFilter, setSelectedFilter] = useState<'ALL' | 'HACKATHON' | 'INTERNSHIP' | 'JOB'>('ALL');
-  const [showPantherPopup, setShowPantherPopup] = useState(true);
+  const [errorMsg, setErrorMsg] = useState('');
+  const [selectedOpp, setSelectedOpp] = useState<OpportunityItem | null>(null);
 
-  // Active current user roadmap phase step (e.g., Phase 1, Phase 2)
-  const currentPhase = useMemo(() => {
-    const active = profile.roadmap?.find((m) => m.status === 'current');
-    return active ? active.stepNumber : 1;
-  }, [profile.roadmap]);
+  const [studentCtx, setStudentCtx] = useState({
+    targetRoleTitle: profile.targetRole?.roleTitle || 'Target Role',
+    currentPhase: 1,
+    totalActive: 0,
+    unlockedCount: 0,
+    lockedCount: 0,
+    closingSoonCount: 0,
+  });
+
+  const [opportunities, setOpportunities] = useState<OpportunityItem[]>([]);
+
+  const loadFeed = useCallback(
+    async (category: CategoryTab, isRefresh = false) => {
+      if (isRefresh) setRefreshing(true);
+      else setLoading(true);
+      setErrorMsg('');
+
+      try {
+        const data = await apiRequest<{
+          success: boolean;
+          studentContext: typeof studentCtx;
+          opportunities: OpportunityItem[];
+        }>(`/api/opportunities/feed?category=${category}`);
+
+        if (data.studentContext) setStudentCtx(data.studentContext);
+        setOpportunities(data.opportunities || []);
+      } catch (err: any) {
+        setErrorMsg(err?.message || 'Unable to reach Opportunity Intelligence Engine.');
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
+      }
+    },
+    []
+  );
 
   useEffect(() => {
-    loadCachedAndFetchRadar();
-  }, [profile.targetRole.roleId]);
+    loadFeed(activeTab);
+  }, [activeTab, loadFeed]);
 
-  const loadCachedAndFetchRadar = async () => {
-    try {
-      const cached = await AsyncStorage.getItem(cacheKey);
-      if (cached) {
-        setOpportunities(JSON.parse(cached));
-        setLoading(false);
-      }
-    } catch {
-      // Ignore
-    }
+  if (selectedOpp) {
+    return (
+      <OpportunityDetailScreen
+        opportunity={selectedOpp}
+        currentPhase={studentCtx.currentPhase}
+        onBack={() => setSelectedOpp(null)}
+        onNavigateToRoadmap={() => {
+          setSelectedOpp(null);
+          if (onNavigateToRoadmap) onNavigateToRoadmap();
+          else onBack();
+        }}
+      />
+    );
+  }
 
-    syncRadar();
-  };
+  const unlockedOpps = opportunities.filter((o) => !o.isLocked);
+  const lockedOpps = opportunities.filter((o) => o.isLocked);
 
-  const syncRadar = async () => {
-    setRefreshing(true);
-    try {
-      const res = await fetchLiveRadarOpportunities({
-        targetRole: profile.targetRole,
-        userSkills: profile.skills,
-      });
+  const renderCard = (opp: OpportunityItem) => (
+    <TouchableOpacity
+      key={opp.id}
+      style={[styles.card, opp.isLocked && styles.cardLocked]}
+      activeOpacity={0.82}
+      onPress={() => setSelectedOpp(opp)}
+    >
+      <View style={styles.rowBetween}>
+        <View style={styles.row}>
+          <Text style={styles.phasePill}>Phase {opp.minRoadmapPhase}</Text>
+          <Text
+            style={[
+              styles.matchPill,
+              opp.isLocked && {
+                color: '#fda4af',
+                backgroundColor: 'rgba(244, 63, 94, 0.16)',
+              },
+            ]}
+          >
+            {opp.matchLabel}
+          </Text>
+        </View>
+        {opp.isLocked ? (
+          <Lock size={15} color="#f43f5e" />
+        ) : (
+          <CheckCircle2 size={15} color="#34d399" />
+        )}
+      </View>
 
-      if (res && res.opportunities && res.opportunities.length > 0) {
-        setOpportunities(res.opportunities);
-        await AsyncStorage.setItem(cacheKey, JSON.stringify(res.opportunities));
-      }
-    } catch (e) {
-      console.warn('Sync radar error:', e);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  };
+      <Text style={styles.cardTitle}>{opp.title}</Text>
+      <Text style={styles.cardCompany}>{opp.company}</Text>
 
-  const filteredOpportunities = useMemo(() => {
-    if (selectedFilter === 'ALL') return opportunities;
-    return opportunities.filter((o) => (o.type || '').toUpperCase().includes(selectedFilter));
-  }, [opportunities, selectedFilter]);
+      <View style={[styles.row, { marginTop: 6, gap: 6 }]}>
+        <MapPin size={12} color="#94a3b8" />
+        <Text style={styles.cardMeta} numberOfLines={1}>
+          {opp.location} • {opp.workMode}
+        </Text>
+      </View>
 
-  const topOpportunity = opportunities[0];
-
-  const handleOpenLink = async (targetUrl: string, queryFallback?: string) => {
-    try {
-      let finalUrl = targetUrl;
-      if (!finalUrl || !finalUrl.startsWith('http')) {
-        const q = encodeURIComponent(queryFallback || targetUrl || 'hackathons');
-        finalUrl = `https://www.google.com/search?q=${q}`;
-      }
-
-      const supported = await Linking.canOpenURL(finalUrl);
-      if (supported) {
-        await Linking.openURL(finalUrl);
-      } else {
-        await Linking.openURL(
-          `https://www.google.com/search?q=${encodeURIComponent(queryFallback || 'tech opportunities')}`
-        );
-      }
-    } catch (error) {
-      console.warn('Could not open link:', error);
-    }
-  };
-
-  // Helper: Checks if opportunity is eligible for current phase
-  const checkPhaseEligibility = (item: DynamicOpportunity) => {
-    if (item.eligiblePhases && Array.isArray(item.eligiblePhases)) {
-      return item.eligiblePhases.includes(currentPhase);
-    }
-    const targetRequired = item.requiredPhase || 1;
-    return currentPhase >= targetRequired;
-  };
+      {opp.isLocked ? (
+        <View style={styles.lockedFooter}>
+          <Text style={styles.lockedMissing} numberOfLines={2}>
+            Missing: {opp.missingMandatorySkills.map((m) => m.name).join(', ')}
+          </Text>
+          <TouchableOpacity
+            style={styles.learnBtn}
+            onPress={() => {
+              if (onNavigateToRoadmap) onNavigateToRoadmap();
+              else setSelectedOpp(opp);
+            }}
+          >
+            <GraduationCap size={12} color="#ffffff" />
+            <Text style={styles.learnBtnText}>Learn Skills</Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <View style={styles.cardFooter}>
+          <Text style={styles.whyText} numberOfLines={1}>
+            {opp.whyMatched}
+          </Text>
+          <ChevronRight size={16} color="#c084fc" />
+        </View>
+      )}
+    </TouchableOpacity>
+  );
 
   return (
     <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="light-content" />
       <FutureXHeader
-        title="Opportunities Radar"
-        subtitle={`Stage-Gated Matches • Current: Phase ${currentPhase}`}
+        title="Opportunity Intelligence"
+        subtitle="Opportunities built around your future"
         onBack={onBack}
       />
 
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        {/* Top Match Spotlight Card */}
-        {topOpportunity && (
-          <View style={styles.topCard}>
-            <View style={styles.topHeaderRow}>
-              <View style={styles.badgeRow}>
-                {checkPhaseEligibility(topOpportunity) ? (
-                  <View style={styles.topBadgeEligible}>
-                    <ShieldCheck size={12} color="#34d399" />
-                    <Text style={styles.topBadgeEligibleText}>COMPLETELY ELIGIBLE</Text>
-                  </View>
-                ) : (
-                  <View style={styles.topBadgeLocked}>
-                    <Lock size={12} color="#f59e0b" />
-                    <Text style={styles.topBadgeLockedText}>
-                      UNLOCKS IN PHASE {topOpportunity.requiredPhase || 2}
-                    </Text>
-                  </View>
-                )}
-                {topOpportunity.type ? (
-                  <View style={styles.typeBadge}>
-                    <Text style={styles.typeBadgeText}>{topOpportunity.type.toUpperCase()}</Text>
-                  </View>
-                ) : null}
-              </View>
-
-              <View style={styles.scoreDial}>
-                <Text style={styles.scoreDialValue}>{topOpportunity.matchScore}%</Text>
-                <Text style={styles.scoreDialLabel}>MATCH</Text>
-              </View>
-            </View>
-
-            <Text style={styles.oppTitle}>{topOpportunity.title}</Text>
-
-            <View style={styles.metaLocationRow}>
-              <View style={styles.rowInline}>
-                <Building size={13} color="#94a3b8" />
-                <Text style={styles.orgName}>{topOpportunity.organization}</Text>
-              </View>
-              <Text style={styles.dotSeparator}>•</Text>
-              <View style={styles.rowInline}>
-                <MapPin size={13} color="#94a3b8" />
-                <Text style={styles.locationText}>{topOpportunity.location}</Text>
-              </View>
-            </View>
-
-            {topOpportunity.stipendOrPrize ? (
-              <View style={styles.prizeBanner}>
-                <DollarSign size={14} color="#10b981" />
-                <Text style={styles.prizeBannerText}>{topOpportunity.stipendOrPrize}</Text>
-              </View>
-            ) : null}
-
-            <View style={styles.reasonBlock}>
-              <View style={styles.reasonRow}>
-                <CheckCircle size={14} color="#34d399" />
-                <Text style={styles.reasonText}>{topOpportunity.summary}</Text>
-              </View>
-            </View>
-
-            <View style={styles.skillsSection}>
-              <Text style={styles.skillsHeading}>Required Competencies:</Text>
-              <View style={styles.skillsTagRow}>
-                {topOpportunity.requiredSkills?.map((sk, idx) => (
-                  <View key={`req-${idx}`} style={styles.skillPill}>
-                    <Text style={styles.skillPillText}>{sk}</Text>
-                  </View>
-                ))}
-              </View>
-
-              {topOpportunity.missingSkills && topOpportunity.missingSkills.length > 0 ? (
-                <View style={styles.missingBox}>
-                  <AlertTriangle size={13} color="#f59e0b" />
-                  <Text style={styles.missingText}>
-                    Missing Gaps: {topOpportunity.missingSkills.join(', ')}
-                  </Text>
-                </View>
-              ) : null}
-            </View>
-
-            <View style={styles.metaFooter}>
-              <View style={styles.deadlineBadge}>
-                <Clock size={12} color="#94a3b8" />
-                <Text style={styles.deadlineText}>Deadline: {topOpportunity.deadline || 'Active 2026'}</Text>
-              </View>
-            </View>
-
-            {checkPhaseEligibility(topOpportunity) ? (
-              <TouchableOpacity
-                style={styles.applyBtn}
-                activeOpacity={0.85}
-                onPress={() =>
-                  handleOpenLink(
-                    (topOpportunity.applyUrl || topOpportunity.applicationUrl) as string,
-                    `${topOpportunity.title} ${topOpportunity.organization} apply`
-                  )
-                }
-              >
-                <Text style={styles.applyBtnText}>Apply to Official Portal</Text>
-                <ExternalLink size={16} color="#FFFFFF" />
-              </TouchableOpacity>
-            ) : (
-              <TouchableOpacity
-                style={styles.lockedBtn}
-                activeOpacity={0.85}
-                onPress={() => {
-                  if (onNavigateToRoadmap) onNavigateToRoadmap();
-                  else onBack();
-                }}
-              >
-                <Text style={styles.lockedBtnText}>
-                  Complete Phase {topOpportunity.requiredPhase || 2} on Roadmap to Unlock
-                </Text>
-                <ArrowRight size={15} color="#f59e0b" />
-              </TouchableOpacity>
-            )}
+      {/* Personalized Context Banner */}
+      <View style={styles.contextCard}>
+        <LinearGradient
+          colors={['rgba(168, 85, 247, 0.2)', 'rgba(56, 189, 248, 0.06)']}
+          style={StyleSheet.absoluteFill}
+        />
+        <View style={styles.rowBetween}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.ctxEyebrow}>ACTIVE CAREER TRACK</Text>
+            <Text style={styles.ctxTitle}>{studentCtx.targetRoleTitle}</Text>
           </View>
-        )}
+          <View style={styles.phaseBadge}>
+            <Text style={styles.phaseBadgeText}>Phase {studentCtx.currentPhase}</Text>
+          </View>
+        </View>
+        <View style={styles.ctxStats}>
+          <Text style={styles.ctxStatText}>
+            Unlocked: <Text style={{ color: '#34d399', fontWeight: '800' }}>{studentCtx.unlockedCount}</Text>
+          </Text>
+          <Text style={styles.ctxStatText}>
+            Locked: <Text style={{ color: '#fda4af', fontWeight: '800' }}>{studentCtx.lockedCount}</Text>
+          </Text>
+          <Text style={styles.ctxStatText}>
+            Live Verified: <Text style={{ color: '#38bdf8', fontWeight: '800' }}>{studentCtx.totalActive}</Text>
+          </Text>
+        </View>
+      </View>
 
-        {/* Filter Pills */}
-        <View style={styles.filterRow}>
-          {(['ALL', 'HACKATHON', 'INTERNSHIP', 'JOB'] as const).map((filter) => (
+      {/* 3 Primary Category Tabs */}
+      <View style={styles.tabRow}>
+        {TABS.map((t) => {
+          const active = activeTab === t.key;
+          return (
             <TouchableOpacity
-              key={filter}
-              style={[styles.filterChip, selectedFilter === filter && styles.activeFilterChip]}
-              onPress={() => setSelectedFilter(filter)}
+              key={t.key}
+              style={[styles.tabBtn, active && styles.tabBtnActive]}
+              onPress={() => setActiveTab(t.key)}
             >
-              <Text style={[styles.filterText, selectedFilter === filter && styles.activeFilterText]}>
-                {filter}
+              <Text style={[styles.tabText, active && styles.tabTextActive]}>
+                {t.label}
               </Text>
             </TouchableOpacity>
-          ))}
-          {refreshing && <ActivityIndicator size="small" color="#38bdf8" style={{ marginLeft: 6 }} />}
+          );
+        })}
+      </View>
+
+      {loading ? (
+        <View style={styles.centerBox}>
+          <ActivityIndicator size="large" color="#c084fc" />
+          <Text style={styles.loadingText}>Evaluating live verified opportunities...</Text>
         </View>
-
-        <Text style={styles.sectionTitle}>
-          Ground-Verified Radar Alerts ({filteredOpportunities.length})
-        </Text>
-
-        {loading ? (
-          <View style={styles.centerLoading}>
-            <ActivityIndicator size="large" color="#34d399" />
-            <Text style={styles.loadingText}>Syncing roadmap stage telemetry...</Text>
-          </View>
-        ) : (
-          filteredOpportunities.slice(1).map((item) => {
-            const isEligible = checkPhaseEligibility(item);
-
-            return (
-              <View
-                key={item.id}
-                style={[
-                  styles.regularCard,
-                  !isEligible && { borderColor: 'rgba(245, 158, 11, 0.25)' },
-                ]}
-              >
-                <View style={styles.regularHeader}>
-                  <View style={{ flex: 1, paddingRight: 8 }}>
-                    <View style={styles.badgeRowSmall}>
-                      <Text style={styles.regularTypeBadge}>{item.type || 'ACTIVE OPENING'}</Text>
-                      {item.stipendOrPrize ? (
-                        <Text style={styles.regularPrizeBadge}>{item.stipendOrPrize}</Text>
-                      ) : null}
-                      {isEligible ? (
-                        <View style={styles.miniEligibleBadge}>
-                          <Text style={styles.miniEligibleText}>ELIGIBLE</Text>
-                        </View>
-                      ) : (
-                        <View style={styles.miniLockedBadge}>
-                          <Text style={styles.miniLockedText}>
-                            PHASE {item.requiredPhase || 2} REQ
-                          </Text>
-                        </View>
-                      )}
-                    </View>
-                    <Text style={styles.regularTitle}>{item.title}</Text>
-                    <Text style={styles.regularOrg}>
-                      {item.organization} • {item.location}
-                    </Text>
-                  </View>
-
-                  <View
-                    style={[
-                      styles.smallScoreDial,
-                      !isEligible && { borderColor: '#f59e0b', backgroundColor: 'rgba(245, 158, 11, 0.08)' },
-                    ]}
-                  >
-                    <Text style={[styles.smallScoreVal, !isEligible && { color: '#f59e0b' }]}>
-                      {item.matchScore}%
-                    </Text>
-                  </View>
-                </View>
-
-                <View style={styles.skillsTagRow}>
-                  {item.requiredSkills?.slice(0, 4).map((sk, idx) => (
-                    <View key={idx} style={styles.skillPill}>
-                      <Text style={styles.skillPillText}>{sk}</Text>
-                    </View>
-                  ))}
-                </View>
-
-                {item.missingSkills && item.missingSkills.length > 0 ? (
-                  <View style={styles.missingPillRow}>
-                    <AlertTriangle size={11} color="#f59e0b" />
-                    <Text style={styles.missingPillText}>
-                      Missing: {item.missingSkills.join(', ')}
-                    </Text>
-                  </View>
-                ) : null}
-
-                {isEligible ? (
-                  <TouchableOpacity
-                    style={styles.detailsBtn}
-                    activeOpacity={0.8}
-                    onPress={() =>
-                      handleOpenLink(
-                        (item.applyUrl || item.applicationUrl) as string,
-                        `${item.title} ${item.organization} apply`
-                      )
-                    }
-                  >
-                    <Text style={styles.detailsBtnText}>Verify Listing & Apply</Text>
-                    <ExternalLink size={13} color="#cbd5e1" />
-                  </TouchableOpacity>
-                ) : (
-                  <TouchableOpacity
-                    style={styles.lockedDetailsBtn}
-                    activeOpacity={0.8}
-                    onPress={() => {
-                      if (onNavigateToRoadmap) onNavigateToRoadmap();
-                      else onBack();
-                    }}
-                  >
-                    <Text style={styles.lockedDetailsBtnText}>
-                      Learn in Phase {item.requiredPhase || 2} on Roadmap
-                    </Text>
-                    <ArrowRight size={13} color="#f59e0b" />
-                  </TouchableOpacity>
-                )}
+      ) : errorMsg ? (
+        <View style={styles.centerBox}>
+          <AlertCircle size={28} color="#f43f5e" />
+          <Text style={styles.errorText}>{errorMsg}</Text>
+          <TouchableOpacity style={styles.retryBtn} onPress={() => loadFeed(activeTab)}>
+            <RefreshCw size={14} color="#ffffff" />
+            <Text style={styles.retryText}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <ScrollView
+          contentContainerStyle={styles.listContent}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={() => loadFeed(activeTab, true)}
+              tintColor="#c084fc"
+            />
+          }
+        >
+          {unlockedOpps.length > 0 && (
+            <View style={{ marginBottom: 16 }}>
+              <View style={styles.sectionHeader}>
+                <Sparkles size={14} color="#34d399" />
+                <Text style={styles.sectionHeaderText}>
+                  RECOMMENDED FOR YOUR PHASE ({unlockedOpps.length})
+                </Text>
               </View>
-            );
-          })
-        )}
-      </ScrollView>
+              {unlockedOpps.map(renderCard)}
+            </View>
+          )}
 
-      {topOpportunity ? (
-        <PantherDialoguePopup
-          visible={showPantherPopup}
-          mode="scout"
-          tagline="ROADMAP-GATED RADAR"
-          message={`Arjav, you are in Phase ${currentPhase}. Openings requiring Phase ${currentPhase + 1} skills are locked until you master the upcoming milestones.`}
-          onDismiss={() => setShowPantherPopup(false)}
-        />
-      ) : null}
+          {lockedOpps.length > 0 && (
+            <View style={{ marginBottom: 16 }}>
+              <View style={styles.sectionHeader}>
+                <Lock size={14} color="#f43f5e" />
+                <Text style={[styles.sectionHeaderText, { color: '#fda4af' }]}>
+                  UNLOCK YOUR NEXT PHASE ({lockedOpps.length})
+                </Text>
+              </View>
+              {lockedOpps.map(renderCard)}
+            </View>
+          )}
+
+          {opportunities.length === 0 && (
+            <View style={styles.emptyBox}>
+              <Text style={styles.emptyTitle}>No active {activeTab.toLowerCase()}s right now</Text>
+              <Text style={styles.emptySub}>
+                Live feeds refresh automatically. Pull down to check again or switch tabs.
+              </Text>
+            </View>
+          )}
+        </ScrollView>
+      )}
     </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#05030a' },
-  scrollContent: { padding: 16, gap: 14, paddingBottom: 60 },
-  topCard: {
-    backgroundColor: 'rgba(18, 13, 31, 0.85)',
-    borderRadius: 20,
-    padding: 18,
-    borderWidth: 1.5,
-    borderColor: '#34d399',
-  },
-  topHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
-  badgeRow: { flexDirection: 'row', gap: 6, alignItems: 'center' },
-  topBadgeEligible: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: 'rgba(52, 211, 153, 0.15)',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
-  },
-  topBadgeEligibleText: { color: '#34d399', fontSize: 10, fontWeight: '800', letterSpacing: 0.8 },
-  topBadgeLocked: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: 'rgba(245, 158, 11, 0.15)',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
-  },
-  topBadgeLockedText: { color: '#f59e0b', fontSize: 10, fontWeight: '800', letterSpacing: 0.8 },
-  typeBadge: { backgroundColor: 'rgba(56, 189, 248, 0.12)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
-  typeBadgeText: { color: '#38bdf8', fontSize: 10, fontWeight: '700' },
-  scoreDial: {
-    width: 58,
-    height: 58,
-    borderRadius: 29,
-    borderWidth: 2.5,
-    borderColor: '#34d399',
-    backgroundColor: 'rgba(52, 211, 153, 0.08)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  scoreDialValue: { color: '#ffffff', fontSize: 15, fontWeight: '800' },
-  scoreDialLabel: { color: '#34d399', fontSize: 8, fontWeight: '800' },
-  oppTitle: { color: '#FFFFFF', fontSize: 18, fontWeight: '800', marginTop: 10 },
-  metaLocationRow: { flexDirection: 'row', alignItems: 'center', marginTop: 4, gap: 6 },
-  rowInline: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  orgName: { color: '#cbd5e1', fontSize: 13, fontWeight: '600' },
-  locationText: { color: '#94a3b8', fontSize: 12 },
-  dotSeparator: { color: '#64748b' },
-  prizeBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: 'rgba(16, 185, 129, 0.12)',
+  row: { flexDirection: 'row', alignItems: 'center' },
+  rowBetween: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  contextCard: {
+    marginHorizontal: 16,
+    marginBottom: 12,
+    borderRadius: 18,
+    overflow: 'hidden',
+    padding: 15,
+    backgroundColor: '#110b20',
     borderWidth: 1,
-    borderColor: 'rgba(16, 185, 129, 0.25)',
+    borderColor: 'rgba(192, 132, 252, 0.25)',
+  },
+  ctxEyebrow: { color: '#c084fc', fontSize: 9, fontWeight: '800', letterSpacing: 0.8 },
+  ctxTitle: { color: '#ffffff', fontSize: 16, fontWeight: '800', marginTop: 2 },
+  phaseBadge: {
+    backgroundColor: 'rgba(168, 85, 247, 0.22)',
+    borderWidth: 1,
+    borderColor: '#c084fc',
     paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 8,
-    alignSelf: 'flex-start',
-    marginTop: 10,
-  },
-  prizeBannerText: { color: '#10b981', fontSize: 12, fontWeight: '700' },
-  reasonBlock: { marginVertical: 10 },
-  reasonRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 6 },
-  reasonText: { color: '#cbd5e1', fontSize: 12, flex: 1, lineHeight: 17 },
-  skillsSection: { marginTop: 6 },
-  skillsHeading: { color: '#94a3b8', fontSize: 11, fontWeight: '700', textTransform: 'uppercase', marginBottom: 6 },
-  skillsTagRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  skillPill: {
-    backgroundColor: 'rgba(255, 255, 255, 0.06)',
-    paddingHorizontal: 8,
     paddingVertical: 4,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
+    borderRadius: 10,
   },
-  skillPillText: { color: '#cbd5e1', fontSize: 11 },
-  missingBox: {
+  phaseBadgeText: { color: '#ffffff', fontSize: 11, fontWeight: '800' },
+  ctxStats: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 10,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.08)',
+  },
+  ctxStatText: { color: '#94a3b8', fontSize: 11, fontWeight: '600' },
+  tabRow: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingHorizontal: 16,
+    marginBottom: 12,
+  },
+  tabBtn: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    alignItems: 'center',
+  },
+  tabBtnActive: {
+    backgroundColor: 'rgba(168, 85, 247, 0.28)',
+    borderColor: '#c084fc',
+  },
+  tabText: { color: '#94a3b8', fontSize: 12, fontWeight: '700' },
+  tabTextActive: { color: '#ffffff' },
+  listContent: { paddingHorizontal: 16, paddingBottom: 40 },
+  sectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: 'rgba(245, 158, 11, 0.12)',
-    borderWidth: 1,
-    borderColor: 'rgba(245, 158, 11, 0.25)',
-    borderRadius: 8,
-    padding: 8,
-    marginTop: 8,
+    marginBottom: 10,
+    marginLeft: 2,
   },
-  missingText: { color: '#f59e0b', fontSize: 11, fontWeight: '600', flex: 1 },
-  metaFooter: { marginTop: 12 },
-  deadlineBadge: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  deadlineText: { color: '#94a3b8', fontSize: 11 },
-  applyBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    backgroundColor: '#10b981',
-    borderRadius: 12,
-    paddingVertical: 12,
-    marginTop: 12,
+  sectionHeaderText: {
+    color: '#34d399',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.8,
   },
-  applyBtnText: { color: '#FFFFFF', fontSize: 13, fontWeight: '700' },
-  lockedBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    backgroundColor: 'rgba(245, 158, 11, 0.12)',
-    borderWidth: 1,
-    borderColor: 'rgba(245, 158, 11, 0.35)',
-    borderRadius: 12,
-    paddingVertical: 12,
-    marginTop: 12,
-  },
-  lockedBtnText: { color: '#f59e0b', fontSize: 12, fontWeight: '700' },
-  filterRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginVertical: 4 },
-  filterChip: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 12,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
-  },
-  activeFilterChip: { backgroundColor: 'rgba(56, 189, 248, 0.15)', borderColor: '#38bdf8' },
-  filterText: { color: '#94a3b8', fontSize: 11, fontWeight: '600' },
-  activeFilterText: { color: '#38bdf8', fontWeight: '700' },
-  sectionTitle: { color: '#FFFFFF', fontSize: 15, fontWeight: '700', marginTop: 10 },
-  centerLoading: { padding: 40, alignItems: 'center', gap: 12 },
-  loadingText: { color: '#94a3b8', fontSize: 12 },
-  regularCard: {
-    backgroundColor: 'rgba(12, 8, 23, 0.85)',
+  card: {
+    backgroundColor: '#110b20',
     borderRadius: 16,
     padding: 14,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
-    gap: 10,
+    borderColor: 'rgba(255,255,255,0.09)',
+    marginBottom: 10,
   },
-  regularHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
-  badgeRowSmall: { flexDirection: 'row', gap: 6, marginBottom: 4, alignItems: 'center' },
-  regularTypeBadge: { color: '#38bdf8', fontSize: 9, fontWeight: '800' },
-  regularPrizeBadge: { color: '#34d399', fontSize: 9, fontWeight: '700' },
-  miniEligibleBadge: {
-    backgroundColor: 'rgba(52, 211, 153, 0.15)',
-    paddingHorizontal: 6,
+  cardLocked: {
+    borderColor: 'rgba(244, 63, 94, 0.35)',
+    backgroundColor: 'rgba(244, 63, 94, 0.05)',
+  },
+  phasePill: {
+    color: '#38bdf8',
+    fontSize: 10,
+    fontWeight: '800',
+    backgroundColor: 'rgba(56, 189, 248, 0.14)',
+    paddingHorizontal: 7,
     paddingVertical: 2,
-    borderRadius: 4,
+    borderRadius: 6,
+    marginRight: 6,
   },
-  miniEligibleText: { color: '#34d399', fontSize: 8, fontWeight: '800' },
-  miniLockedBadge: {
-    backgroundColor: 'rgba(245, 158, 11, 0.15)',
-    paddingHorizontal: 6,
+  matchPill: {
+    color: '#c084fc',
+    fontSize: 10,
+    fontWeight: '800',
+    backgroundColor: 'rgba(168, 85, 247, 0.18)',
+    paddingHorizontal: 7,
     paddingVertical: 2,
-    borderRadius: 4,
+    borderRadius: 6,
   },
-  miniLockedText: { color: '#f59e0b', fontSize: 8, fontWeight: '800' },
-  regularTitle: { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
-  regularOrg: { color: '#94a3b8', fontSize: 12, marginTop: 2 },
-  smallScoreDial: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    borderWidth: 2,
-    borderColor: '#38bdf8',
-    backgroundColor: 'rgba(56, 189, 248, 0.08)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  smallScoreVal: { color: '#38bdf8', fontSize: 12, fontWeight: '800' },
-  missingPillRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  missingPillText: { color: '#f59e0b', fontSize: 11 },
-  detailsBtn: {
+  cardTitle: { color: '#ffffff', fontSize: 15, fontWeight: '800', marginTop: 8 },
+  cardCompany: { color: '#cbd5e1', fontSize: 12, fontWeight: '600', marginTop: 2 },
+  cardMeta: { color: '#94a3b8', fontSize: 11, flex: 1 },
+  cardFooter: {
     flexDirection: 'row',
-    justifyContent: 'center',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 10,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.06)',
+  },
+  whyText: { color: '#94a3b8', fontSize: 11, flex: 1, paddingRight: 8 },
+  lockedFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    marginTop: 10,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(244, 63, 94, 0.2)',
+  },
+  lockedMissing: { color: '#fb923c', fontSize: 11, flex: 1, fontWeight: '600' },
+  learnBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: '#9333ea',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  learnBtnText: { color: '#ffffff', fontSize: 11, fontWeight: '800' },
+  centerBox: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24, gap: 10 },
+  loadingText: { color: '#94a3b8', fontSize: 12 },
+  errorText: { color: '#fda4af', fontSize: 13, textAlign: 'center' },
+  retryBtn: {
+    flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    backgroundColor: '#9333ea',
+    paddingHorizontal: 16,
+    paddingVertical: 9,
     borderRadius: 10,
-    paddingVertical: 10,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
+    marginTop: 6,
   },
-  detailsBtnText: { color: '#FFFFFF', fontSize: 12, fontWeight: '600' },
-  lockedDetailsBtn: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: 'rgba(245, 158, 11, 0.08)',
-    borderRadius: 10,
-    paddingVertical: 10,
-    borderWidth: 1,
-    borderColor: 'rgba(245, 158, 11, 0.2)',
-  },
-  lockedDetailsBtnText: { color: '#f59e0b', fontSize: 11, fontWeight: '700' },
+  retryText: { color: '#ffffff', fontSize: 12, fontWeight: '700' },
+  emptyBox: { alignItems: 'center', paddingVertical: 40 },
+  emptyTitle: { color: '#ffffff', fontSize: 15, fontWeight: '700' },
+  emptySub: { color: '#94a3b8', fontSize: 12, textAlign: 'center', marginTop: 6 },
 });
 
 export default OpportunitiesScreen;

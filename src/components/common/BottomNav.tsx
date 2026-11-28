@@ -1,10 +1,11 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
-import { Home, ShieldCheck } from 'lucide-react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Home, User } from 'lucide-react-native';
 
 interface BottomNavProps {
-  currentTab: 'home' | 'proof';
-  onSelectTab: (tab: 'home' | 'proof') => void;
+  currentTab: string;
+  onSelectTab: (tab: any) => void;
   accentColor?: string;
 }
 
@@ -13,63 +14,79 @@ export const BottomNav: React.FC<BottomNavProps> = ({
   onSelectTab,
   accentColor = '#c084fc',
 }) => {
-  return (
-    <View style={styles.container}>
-      <TouchableOpacity
-        style={[styles.tab, currentTab === 'home' && styles.activeTab]}
-        onPress={() => onSelectTab('home')}
-        activeOpacity={0.7}
-      >
-        <Home size={20} color={currentTab === 'home' ? accentColor : '#94a3b8'} />
-        <Text style={[styles.text, { color: currentTab === 'home' ? '#fff' : '#94a3b8' }]}>
-          Home
-        </Text>
-      </TouchableOpacity>
+  const insets = useSafeAreaInsets();
 
-      <TouchableOpacity
-        style={[styles.tab, currentTab === 'proof' && styles.activeTab]}
-        onPress={() => onSelectTab('proof')}
-        activeOpacity={0.7}
-      >
-        <ShieldCheck size={20} color={currentTab === 'proof' ? accentColor : '#94a3b8'} />
-        <Text style={[styles.text, { color: currentTab === 'proof' ? '#fff' : '#94a3b8' }]}>
-          Proof Pass
-        </Text>
-      </TouchableOpacity>
+  const isHome = currentTab === 'home';
+  const isProfile = currentTab === 'profile';
+
+  return (
+    <View style={[styles.wrapper, { paddingBottom: Math.max(insets.bottom, 10) }]}>
+      <View style={styles.bar}>
+        <TouchableOpacity
+          style={[
+            styles.tabBtn,
+            isHome && {
+              backgroundColor: 'rgba(192, 132, 252, 0.16)',
+              borderColor: accentColor + '55',
+            },
+          ]}
+          activeOpacity={0.8}
+          onPress={() => onSelectTab('home')}
+        >
+          <Home size={18} color={isHome ? accentColor : '#94a3b8'} />
+          <Text style={[styles.tabLabel, isHome && { color: '#ffffff' }]}>Home</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[
+            styles.tabBtn,
+            isProfile && {
+              backgroundColor: 'rgba(192, 132, 252, 0.16)',
+              borderColor: accentColor + '55',
+            },
+          ]}
+          activeOpacity={0.8}
+          onPress={() => onSelectTab('profile')}
+        >
+          <User size={18} color={isProfile ? accentColor : '#94a3b8'} />
+          <Text style={[styles.tabLabel, isProfile && { color: '#ffffff' }]}>Profile</Text>
+        </TouchableOpacity>
+      </View>
     </View>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
+  wrapper: {
     position: 'absolute',
-    bottom: 20,
-    left: 24,
-    right: 24,
-    height: 60,
-    backgroundColor: 'rgba(15, 10, 28, 0.92)',
-    borderRadius: 30,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    alignItems: 'center',
-    elevation: 20,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(5, 3, 10, 0.94)',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.08)',
+    paddingTop: 10,
+    paddingHorizontal: 18,
   },
-  tab: {
+  bar: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  tabBtn: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     gap: 8,
-    paddingVertical: 8,
-    paddingHorizontal: 20,
-    borderRadius: 20,
+    paddingVertical: 11,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'transparent',
   },
-  activeTab: {
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
-  },
-  text: {
+  tabLabel: {
+    color: '#94a3b8',
     fontSize: 13,
-    fontWeight: '600',
+    fontWeight: '700',
   },
 });
 
