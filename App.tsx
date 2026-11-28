@@ -34,14 +34,17 @@ export default function App() {
   const handleLogout = async () => {
     try {
       const refreshToken = await AsyncStorage.getItem(REFRESH_TOKEN_KEY);
-      if (refreshToken) {
-        await apiRequest('/api/auth/logout', {
-          method: 'POST',
-          body: { refreshToken },
-        }).catch(() => {});
-      }
+      await apiRequest('/api/auth/logout', {
+        method: 'POST',
+        body: { refreshToken },
+      }).catch(() => null);
     } finally {
-      await AsyncStorage.multiRemove([AUTH_TOKEN_KEY, REFRESH_TOKEN_KEY, AUTH_USER_KEY]);
+      await AsyncStorage.multiRemove([
+        AUTH_TOKEN_KEY,
+        REFRESH_TOKEN_KEY,
+        '@futurex_auth_user',
+        '@futurex_student_profile_v2',
+      ]);
       setAuthUser(null);
     }
   };

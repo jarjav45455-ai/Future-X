@@ -96,19 +96,21 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
   const initialSkills = generateDomainSkills(defaultRole.id);
   const initialRoadmap = generateRoleRoadmap(defaultRole.id);
 
-  const [pantherPopup, setPantherPopup] = useState<{
+ const [pantherPopup, setPantherPopup] = useState<{
     visible: boolean;
     message: string;
     mode: 'scout' | 'guide' | 'coach' | 'guardian';
   }>({
     visible: true,
-    message: "Arjav, your trajectory is active. Ready to conquer today's next move?",
+    message: `${authUser?.name || 'Student'}, your trajectory is active. Ready to conquer today's next move?`,
     mode: 'scout',
   });
 
-  const [profile, setProfile] = useState<StudentProfile>({
-    id: 'usr-001',
-    name: 'Arjav',
+ 
+
+ const [profile, setProfile] = useState<StudentProfile>({
+    id: authUser?.id || 'usr-001',
+    name: authUser?.name || 'Student',
     targetRole: {
       roleId: defaultRole.id,
       roleTitle: defaultRole.title,
@@ -119,7 +121,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
       keyTools: defaultRole.toolsAndFrameworks,
       marketDemand: 'Very High' as any,
     },
-    readinessPercentage: 42,
+    readinessPercentage: 0,
     skills: initialSkills,
     roadmap: initialRoadmap,
     proofPass: [],
@@ -145,8 +147,19 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
   const [selectedTargetRole, setSelectedTargetRole] = useState('');
 
   useEffect(() => {
+    if (authUser?.id || authUser?.name) {
+      setProfile((prev) => ({
+        ...prev,
+        id: authUser.id || prev.id,
+        name: authUser.name || prev.name,
+      }));
+      setPantherPopup((prev) => ({
+        ...prev,
+        message: `${authUser.name || 'Student'}, your trajectory is active. Ready to conquer today's next move?`,
+      }));
+    }
     loadSavedProfile();
-  }, []);
+  }, [authUser?.id, authUser?.name]);
 
   const loadSavedProfile = async () => {
     try {
@@ -190,6 +203,12 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
           id: authUser?.id || baseProfile.id,
           name: authUser?.name || baseProfile.name,
         });
+      } else if (authUser) {
+        setProfile((prev) => ({
+          ...prev,
+          id: authUser.id,
+          name: authUser.name,
+        }));
       }
     } catch {
       // Fallback to active state

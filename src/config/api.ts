@@ -1,10 +1,25 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Platform } from 'react-native';
 
 export const API_BASE_URL =
   process.env.EXPO_PUBLIC_API_URL?.replace(/\/$/, '') || 'http://192.168.85.51:5000';
 
 export const AUTH_TOKEN_KEY = '@futurex_access_token';
 export const REFRESH_TOKEN_KEY = '@futurex_refresh_token';
+export const DEVICE_ID_KEY = '@futurex_unique_device_id';
+
+export async function getOrCreateDeviceId(): Promise<string> {
+  let id = await AsyncStorage.getItem(DEVICE_ID_KEY);
+  if (!id) {
+    id = `fx-${Platform.OS}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+    await AsyncStorage.setItem(DEVICE_ID_KEY, id);
+  }
+  return id;
+}
+
+export function getDeviceLabel(): string {
+  return Platform.OS === 'ios' ? 'iPhone / iOS Device' : 'Android Phone';
+}
 
 interface RequestOptions {
   method?: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';

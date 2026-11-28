@@ -391,6 +391,36 @@ const { runOpportunityMigrationV4 } = require('./opportunityMigrations');
 const { runAssessmentMigrationV5 } = require('./assessmentMigrations');
 const { seedQuestionBank } = require('./seedQuestionBank');
 
+function ensureUserSessionColumns() {
+  const cols = db
+    .prepare('PRAGMA table_info(users)')
+    .all()
+    .map((c) => c.name);
+
+  db.exec('BEGIN TRANSACTION;');
+  try {
+    if (!cols.includes('active_device_id')) {
+      db.exec('ALTER TABLE users ADD COLUMN active_device_id TEXT DEFAULT NULL;');
+    }
+    if (!cols.includes('active_device_name')) {
+      db.exec('ALTER TABLE users ADD COLUMN active_device_name TEXT DEFAULT NULL;');
+    }
+    if (!cols.includes('active_session_at')) {
+      db.exec('ALTER TABLE users ADD COLUMN active_session_at TEXT DEFAULT NULL;');
+    }
+    if (!cols.includes('college')) {
+      db.exec("ALTER TABLE users ADD COLUMN college TEXT DEFAULT '';");
+    }
+    if (!cols.includes('current_stage')) {
+      db.exec("ALTER TABLE users ADD COLUMN current_stage TEXT DEFAULT 'College Student';");
+    }
+    db.exec('COMMIT;');
+  } catch (err) {
+    db.exec('ROLLBACK;');
+    throw err;
+  }
+}
+
 function initDatabase() {
   runMigrations();
   seedFromJsonBanks();
@@ -399,6 +429,7 @@ function initDatabase() {
   seedQuestionBank(db);
   runMigrationV3();
   runOpportunityMigrationV4(db);
+  ensureUserSessionColumns();
 }
 function getDbStats() {
   const users = db.prepare('SELECT COUNT(*) as count FROM users').get().count;
